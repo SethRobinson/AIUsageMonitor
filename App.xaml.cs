@@ -6,12 +6,16 @@ namespace AIUsageMonitor;
 public partial class App : System.Windows.Application
 {
     private TrayIconService? _trayIconService;
+    private AppLogService? _logService;
 
     protected override void OnStartup(System.Windows.StartupEventArgs e)
     {
         base.OnStartup(e);
 
         ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown;
+
+        _logService = new AppLogService();
+        RegisterGlobalExceptionHandlers();
 
         if (TryGetScreenshotOptions(e.Args, out var screenshotPath, out var screenshotWidth, out var screenshotHeight))
         {
@@ -29,10 +33,40 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var logService = new AppLogService();
+        var logService = _logService;
         var settingsService = new AppSettingsService();
         _trayIconService = new TrayIconService(new UsageAggregatorService(logService, settingsService), settingsService, logService);
         _trayIconService.ShowOverlay();
+    }
+
+    private void RegisterGlobalExceptionHandlers()
+    {
+        // UI-thread (dispatcher) exceptions: log and keep running. This is the channel the
+        // PenIMC tablet-enumeration crash came through, so a handler here turns that class of
+        // failure into a logged warning instead of a process-killing "stopped working" dialog.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            _logService?.Error("UnhandledException", $"Dispatcher: {args.Exception}");
+            args.Handled = true;
+        };
+
+        // Background-thread faults: the runtime still tears the process down, but capture the
+        // detail first so there is a record beyond the Windows event log.
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception exception)
+            {
+                _logService?.Error("UnhandledException", $"AppDomain (terminating={args.IsTerminating}): {exception}");
+            }
+        };
+
+        // Faulted tasks whose exception was never observed: log and mark observed so they do
+        // not escalate to a process-level crash.
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            _logService?.Warning("UnhandledException", $"Unobserved task: {args.Exception}");
+            args.SetObserved();
+        };
     }
 
     protected override void OnExit(System.Windows.ExitEventArgs e)

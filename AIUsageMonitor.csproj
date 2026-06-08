@@ -12,6 +12,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      Disable WPF pen/tablet/touch support. WPF loads penimc_cor3.dll through a custom
+      activation context that does not work with single-file self-extracting publishes,
+      so re-enumerating tablet devices (on a device/settings-change window message) throws
+      DllNotFoundException on the UI thread and crashes the app. This app needs no pen/touch.
+    -->
+    <RuntimeHostConfigurationOption Include="Switch.System.Windows.Input.Stylus.DisableStylusAndTouchSupport" Value="true" Trim="false" />
+
     <Resource Include="Assets\AppIcon.ico" />
 
     <None Update="usage.fake.json">

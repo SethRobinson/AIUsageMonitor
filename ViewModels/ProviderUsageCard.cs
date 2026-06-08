@@ -33,7 +33,7 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         OverallStatusBackground = status.Background;
         SummaryProgressBrush = status.Foreground;
         _summaryText = usage.IsUnavailable || Windows.Count == 0
-            ? $"{ShortName} - unavailable"
+            ? $"{ShortName} - {GetUnavailableSummary(usage.StatusMessage)}"
             : $"{ShortName} - {PrimaryRemainingPercent:0}%";
         RefreshCheckedText();
     }
@@ -141,5 +141,30 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         }
 
         return $"{providerName} ({planName})";
+    }
+
+    private static string GetUnavailableSummary(string statusMessage)
+    {
+        if (statusMessage.Contains("not running", StringComparison.OrdinalIgnoreCase))
+        {
+            return "not running";
+        }
+
+        if (statusMessage.Contains("not installed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "not installed";
+        }
+
+        if (statusMessage.Contains("paused", StringComparison.OrdinalIgnoreCase))
+        {
+            return "paused";
+        }
+
+        if (statusMessage.Contains("failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "failed";
+        }
+
+        return "unavailable";
     }
 }

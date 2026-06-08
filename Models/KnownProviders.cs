@@ -4,6 +4,7 @@ public static class KnownProviders
 {
     public const string Anthropic = "Anthropic";
     public const string OpenAI = "OpenAI";
+    public const string Antigravity = "Antigravity";
     public const string Gemini = "Gemini";
     public const string Cursor = "Cursor";
 
@@ -11,6 +12,7 @@ public static class KnownProviders
     [
         Anthropic,
         OpenAI,
+        Antigravity,
         Gemini,
         Cursor
     ];

@@ -121,6 +121,37 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel>
+                                                <CheckBox x:Name="AntigravityProviderEnabledCheckBox"
+                                                          Content="Antigravity"
+                                                          Foreground="#D6DAE1"
+                                                          FontSize="13"
+                                                          FontWeight="SemiBold" />
+                                                <TextBlock Margin="24,4,0,0"
+                                                           Text="Local Antigravity language-server model quota."
+                                                           Foreground="#8B93A1"
+                                                           FontSize="12"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <Button Grid.Column="1"
+                                                    Width="82"
+                                                    Height="30"
+                                                    Margin="12,0,0,0"
+                                                    VerticalAlignment="Top"
+                                                    Content="Setup"
+                                                    Tag="Antigravity"
+                                                    Click="ProviderSetupButtonOnClick" />
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Padding="12"
+                                            BorderBrush="#2A303A"
+                                            BorderThickness="0,0,0,1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
                                                 <CheckBox x:Name="OpenAiProviderEnabledCheckBox"
                                                           Content="OpenAI"
                                                           Foreground="#D6DAE1"
@@ -158,7 +189,7 @@
                                                           FontSize="13"
                                                           FontWeight="SemiBold" />
                                                 <TextBlock Margin="24,4,0,0"
-                                                           Text="Gemini CLI credentials, quota status export, and local session data."
+                                                           Text="Gemini CLI credentials, Code Assist quota, quota status export, and local session data."
                                                            Foreground="#8B93A1"
                                                            FontSize="12"
                                                            TextWrapping="Wrap" />

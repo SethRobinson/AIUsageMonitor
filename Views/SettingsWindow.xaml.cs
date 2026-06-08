@@ -19,6 +19,7 @@ public partial class SettingsWindow : Window
         UpdateIntervalTextBox.Text = Settings.UpdateIntervalMinutes.ToString();
         AnthropicProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Anthropic);
         OpenAiProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.OpenAI);
+        AntigravityProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Antigravity);
         GeminiProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Gemini);
         CursorProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Cursor);
         UpdateCursorModeSummary();
@@ -86,9 +87,14 @@ public partial class SettingsWindow : Window
                 "Install the Codex CLI, run codex, and sign in. Seth's AI Usage Monitor reads quota snapshots from local Codex session logs.",
                 "Open Codex CLI setup",
                 "https://help.openai.com/en/articles/11096431"),
+            KnownProviders.Antigravity => new ProviderSetupInfo(
+                "Antigravity Setup",
+                "Run Antigravity and sign in. Seth's AI Usage Monitor reads the local Antigravity language server quota while Antigravity is running.",
+                "Open Antigravity",
+                "https://antigravity.google/"),
             KnownProviders.Gemini => new ProviderSetupInfo(
                 "Gemini Setup",
-                "Install Gemini CLI, run gemini, and sign in. Seth's AI Usage Monitor reads Gemini CLI credentials, quota status exports, and local session usage.",
+                "Install Gemini CLI, run gemini, and sign in. Seth's AI Usage Monitor reads Gemini CLI credentials, Code Assist quota, quota status exports, and local session usage.",
                 "Open Gemini CLI setup",
                 "https://google-gemini.github.io/gemini-cli/docs/get-started/"),
             _ => null
@@ -128,6 +134,7 @@ public partial class SettingsWindow : Window
     {
         Settings.SetProviderEnabled(KnownProviders.Anthropic, AnthropicProviderEnabledCheckBox.IsChecked == true);
         Settings.SetProviderEnabled(KnownProviders.OpenAI, OpenAiProviderEnabledCheckBox.IsChecked == true);
+        Settings.SetProviderEnabled(KnownProviders.Antigravity, AntigravityProviderEnabledCheckBox.IsChecked == true);
         Settings.SetProviderEnabled(KnownProviders.Gemini, GeminiProviderEnabledCheckBox.IsChecked == true);
         Settings.SetProviderEnabled(KnownProviders.Cursor, CursorProviderEnabledCheckBox.IsChecked == true);
         Settings.ClaudeStatusExporterEnabled = ClaudeStatusExporterCheckBox.IsChecked == true;

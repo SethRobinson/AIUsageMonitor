@@ -43,7 +43,7 @@
                                    FontSize="16"
                                    FontWeight="SemiBold" />
                         <TextBlock Margin="0,8,0,0"
-                                   Text="Windows tray app for checking remaining AI subscription usage across Anthropic, OpenAI/Codex, Gemini, and Cursor."
+                                   Text="Windows tray app for checking remaining AI subscription usage across Anthropic, OpenAI/Codex, Antigravity, Gemini, and Cursor."
                                    Foreground="#A8AFBA"
                                    FontSize="13"
                                    TextWrapping="Wrap" />

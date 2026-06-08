@@ -21,6 +21,7 @@ public sealed class UsageAggregatorService
         [
             new ClaudeStatusFileUsageCollector(),
             new CodexLogUsageCollector(),
+            new AntigravityUsageCollector(),
             new GeminiUsageCollector(),
             new CursorUsageCollector(settingsService)
         ];

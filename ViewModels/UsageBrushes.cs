@@ -7,6 +7,7 @@ internal static class UsageBrushes
 {
     private static readonly MediaBrush AnthropicAccent = FrozenBrush("#F59E0B");
     private static readonly MediaBrush OpenAiAccent = FrozenBrush("#10B981");
+    private static readonly MediaBrush AntigravityAccent = FrozenBrush("#F472B6");
     private static readonly MediaBrush GeminiAccent = FrozenBrush("#60A5FA");
     private static readonly MediaBrush CursorAccent = FrozenBrush("#A78BFA");
     private static readonly MediaBrush DefaultAccent = FrozenBrush("#E5E7EB");
@@ -23,6 +24,11 @@ internal static class UsageBrushes
         if (normalized.StartsWith("openai"))
         {
             return OpenAiAccent;
+        }
+
+        if (normalized.StartsWith("antigravity"))
+        {
+            return AntigravityAccent;
         }
 
         if (normalized.StartsWith("gemini"))
