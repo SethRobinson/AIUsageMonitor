@@ -2,6 +2,7 @@ using System.Windows;
 using AIUsageMonitor.Models;
 using AIUsageMonitor.Services;
 using WpfButton = System.Windows.Controls.Button;
+using WpfSlider = System.Windows.Controls.Slider;
 
 namespace AIUsageMonitor.Views;
 
@@ -16,7 +17,11 @@ public partial class SettingsWindow : Window
         _settingsService = settingsService;
         _logService = logService;
         Settings = settings.Clone();
+        Settings.Normalize();
         UpdateIntervalTextBox.Text = Settings.UpdateIntervalMinutes.ToString();
+        ConfigureUiScaleSlider();
+        UiScaleSlider.Value = Settings.UiScalePercent;
+        UpdateUiScaleValueLabel(Settings.UiScalePercent);
         AnthropicProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Anthropic);
         OpenAiProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.OpenAI);
         AntigravityProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Antigravity);
@@ -30,6 +35,8 @@ public partial class SettingsWindow : Window
     }
 
     public AppSettings Settings { get; private set; }
+
+    public event EventHandler<UiScalePreviewChangedEventArgs>? UiScalePreviewChanged;
 
     private void SaveButtonOnClick(object sender, RoutedEventArgs e)
     {
@@ -46,6 +53,7 @@ public partial class SettingsWindow : Window
         }
 
         Settings.UpdateIntervalMinutes = minutes;
+        Settings.UiScalePercent = GetSelectedUiScalePercent();
         ApplySettingsFromControls();
         DialogResult = true;
     }
@@ -187,6 +195,7 @@ public partial class SettingsWindow : Window
 
     private void ApplySettingsFromControls()
     {
+        Settings.UiScalePercent = GetSelectedUiScalePercent();
         Settings.SetProviderEnabled(KnownProviders.Anthropic, AnthropicProviderEnabledCheckBox.IsChecked == true);
         Settings.SetProviderEnabled(KnownProviders.OpenAI, OpenAiProviderEnabledCheckBox.IsChecked == true);
         Settings.SetProviderEnabled(KnownProviders.Antigravity, AntigravityProviderEnabledCheckBox.IsChecked == true);
@@ -196,6 +205,54 @@ public partial class SettingsWindow : Window
         Settings.AutoRunAtLoginEnabled = AutoRunAtLoginCheckBox.IsChecked == true;
         MergeSavedCursorDashboardLogin();
         Settings.Normalize();
+    }
+
+    private void ConfigureUiScaleSlider()
+    {
+        UiScaleSlider.Minimum = AppSettings.MinimumUiScalePercent;
+        UiScaleSlider.Maximum = AppSettings.MaximumUiScalePercent;
+        UiScaleSlider.TickFrequency = AppSettings.UiScaleStepPercent;
+        UiScaleSlider.SmallChange = AppSettings.UiScaleStepPercent;
+        UiScaleSlider.LargeChange = AppSettings.UiScaleStepPercent * 2;
+    }
+
+    private void UiScaleSliderOnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (UiScaleValueTextBlock is null || sender is not WpfSlider slider)
+        {
+            return;
+        }
+
+        var uiScalePercent = GetUiScalePercent(slider.Value);
+        UpdateUiScaleValueLabel(uiScalePercent);
+        UiScalePreviewChanged?.Invoke(this, new UiScalePreviewChangedEventArgs(uiScalePercent));
+    }
+
+    private int GetSelectedUiScalePercent()
+    {
+        return GetUiScalePercent(UiScaleSlider.Value);
+    }
+
+    private static int GetUiScalePercent(double scaleValue)
+    {
+        var clampedScale = Math.Clamp(
+            scaleValue,
+            AppSettings.MinimumUiScalePercent,
+            AppSettings.MaximumUiScalePercent);
+        var stepCount = (int)Math.Round(
+            (clampedScale - AppSettings.MinimumUiScalePercent) / AppSettings.UiScaleStepPercent,
+            MidpointRounding.AwayFromZero);
+        var steppedScale = AppSettings.MinimumUiScalePercent + stepCount * AppSettings.UiScaleStepPercent;
+
+        return Math.Clamp(
+            steppedScale,
+            AppSettings.MinimumUiScalePercent,
+            AppSettings.MaximumUiScalePercent);
+    }
+
+    private void UpdateUiScaleValueLabel(int uiScalePercent)
+    {
+        UiScaleValueTextBlock.Text = $"{uiScalePercent}%";
     }
 
     private void UpdateCursorModeSummary()
@@ -219,4 +276,14 @@ public partial class SettingsWindow : Window
         string LinkText,
         string Url,
         Action<Window>? LinkAction = null);
+}
+
+public sealed class UiScalePreviewChangedEventArgs : EventArgs
+{
+    public UiScalePreviewChangedEventArgs(int uiScalePercent)
+    {
+        UiScalePercent = uiScalePercent;
+    }
+
+    public int UiScalePercent { get; }
 }

@@ -64,6 +64,12 @@ public partial class UsageOverlayWindow : Window
         typeof(UsageOverlayWindow),
         new PropertyMetadata(816d));
 
+    public static readonly DependencyProperty UiScaleProperty = DependencyProperty.Register(
+        nameof(UiScale),
+        typeof(double),
+        typeof(UsageOverlayWindow),
+        new PropertyMetadata(1d, UiScalePropertyChanged));
+
     private double _resizeStartHeight;
     private double _resizeStartWidth;
     private System.Windows.Point _resizeStartScreenPoint;
@@ -190,6 +196,26 @@ public partial class UsageOverlayWindow : Window
         private set => SetValue(ProvidersListWidthProperty, value);
     }
 
+    public double UiScale
+    {
+        get => (double)GetValue(UiScaleProperty);
+        private set => SetValue(UiScaleProperty, value);
+    }
+
+    public void ApplyUiScalePercent(int scalePercent)
+    {
+        var normalizedScalePercent = NormalizeUiScalePercent(scalePercent);
+        var scale = normalizedScalePercent / 100d;
+
+        if (Math.Abs(UiScale - scale) < 0.001)
+        {
+            QueueResponsiveLayoutUpdate();
+            return;
+        }
+
+        UiScale = scale;
+    }
+
     private void HideButtonOnClick(object sender, RoutedEventArgs e)
     {
         Hide();
@@ -276,8 +302,12 @@ public partial class UsageOverlayWindow : Window
         var delta = ScreenPixelsToDips(GetMouseScreenPosition() - _resizeStartScreenPoint);
         var requestedWidth = Math.Max(MinWidth, _resizeStartWidth + delta.X);
         var requestedHeight = _resizeStartHeight + delta.Y;
-        var layout = CalculateResponsiveLayout(requestedWidth, requestedHeight, ProvidersList.Items.Count);
-        var minimumHeight = GetMinimumWindowHeight(layout.DisplayMode, layout.Rows);
+        var uiScale = EffectiveUiScale;
+        var layout = CalculateResponsiveLayout(
+            ToLogicalDimension(requestedWidth, uiScale),
+            ToLogicalDimension(requestedHeight, uiScale),
+            ProvidersList.Items.Count);
+        var minimumHeight = ToPhysicalDimension(GetMinimumWindowHeight(layout.DisplayMode, layout.Rows), uiScale);
 
         MinHeight = minimumHeight;
         Width = requestedWidth;
@@ -365,7 +395,11 @@ public partial class UsageOverlayWindow : Window
             return;
         }
 
-        var layout = CalculateResponsiveLayout(ActualWidth, ActualHeight, ProvidersList.Items.Count);
+        var uiScale = EffectiveUiScale;
+        var layout = CalculateResponsiveLayout(
+            ToLogicalDimension(ActualWidth, uiScale),
+            ToLogicalDimension(ActualHeight, uiScale),
+            ProvidersList.Items.Count);
         if (!string.Equals(DisplayMode, layout.DisplayMode, StringComparison.Ordinal))
         {
             DisplayMode = layout.DisplayMode;
@@ -376,10 +410,12 @@ public partial class UsageOverlayWindow : Window
             ShowCompactButtons = layout.ShowCompactButtons;
         }
 
-        MinHeight = GetMinimumWindowHeight(layout.DisplayMode, layout.Rows);
+        var minimumHeight = ToPhysicalDimension(GetMinimumWindowHeight(layout.DisplayMode, layout.Rows), uiScale);
+
+        MinHeight = minimumHeight;
         CardSlotWidth = layout.CardSlotWidth;
         ProvidersListWidth = layout.ProvidersListWidth;
-        TrimHeightToContent(MinHeight);
+        TrimHeightToContent(minimumHeight);
     }
 
     private void TrimHeightToContent(double targetHeight)
@@ -515,6 +551,55 @@ public partial class UsageOverlayWindow : Window
             CompactDisplayMode => showCompactButtons ? CompactButtonsHorizontalInset : CompactHorizontalChromeInset,
             _ => 84
         };
+    }
+
+    private double EffectiveUiScale => CoerceUiScale(UiScale);
+
+    private static void UiScalePropertyChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
+    {
+        if (dependencyObject is UsageOverlayWindow window)
+        {
+            window.QueueResponsiveLayoutUpdate();
+        }
+    }
+
+    private static double CoerceUiScale(double scale)
+    {
+        return HasFiniteValue(scale) && scale > 0
+            ? scale
+            : 1d;
+    }
+
+    private static double ToLogicalDimension(double physicalDimension, double uiScale)
+    {
+        return physicalDimension / CoerceUiScale(uiScale);
+    }
+
+    private static double ToPhysicalDimension(double logicalDimension, double uiScale)
+    {
+        return Math.Ceiling(logicalDimension * CoerceUiScale(uiScale));
+    }
+
+    private static int NormalizeUiScalePercent(int uiScalePercent)
+    {
+        if (uiScalePercent <= 0)
+        {
+            return AppSettings.DefaultUiScalePercent;
+        }
+
+        var clampedScale = Math.Clamp(
+            uiScalePercent,
+            AppSettings.MinimumUiScalePercent,
+            AppSettings.MaximumUiScalePercent);
+        var stepCount = (int)Math.Round(
+            (clampedScale - AppSettings.MinimumUiScalePercent) / (double)AppSettings.UiScaleStepPercent,
+            MidpointRounding.AwayFromZero);
+        var steppedScale = AppSettings.MinimumUiScalePercent + stepCount * AppSettings.UiScaleStepPercent;
+
+        return Math.Clamp(
+            steppedScale,
+            AppSettings.MinimumUiScalePercent,
+            AppSettings.MaximumUiScalePercent);
     }
 
     private static Rect GetVirtualScreenBounds()

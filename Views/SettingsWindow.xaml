@@ -56,6 +56,41 @@
                                    Text="Default is 20. Manual refresh still runs immediately."
                                    Foreground="#8B93A1"
                                    FontSize="12" />
+
+                        <StackPanel Margin="0,18,0,0">
+                            <TextBlock Text="UI scale"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#D6DAE1" />
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Slider x:Name="UiScaleSlider"
+                                        Minimum="80"
+                                        Maximum="150"
+                                        TickFrequency="5"
+                                        IsSnapToTickEnabled="True"
+                                        SmallChange="5"
+                                        LargeChange="10"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="UiScaleSliderOnValueChanged" />
+                                <TextBlock x:Name="UiScaleValueTextBlock"
+                                           Grid.Column="1"
+                                           Width="56"
+                                           Margin="12,0,0,0"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Right"
+                                           Foreground="#F9FAFB"
+                                           FontSize="13"
+                                           FontWeight="SemiBold" />
+                            </Grid>
+                            <TextBlock Margin="0,8,0,0"
+                                       Text="Scales the overlay text, controls, spacing, and progress bars."
+                                       Foreground="#8B93A1"
+                                       FontSize="12" />
+                        </StackPanel>
                     </StackPanel>
 
                     <StackPanel Margin="0,22,0,0">

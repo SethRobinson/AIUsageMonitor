@@ -1,4 +1,5 @@
 <Window x:Class="AIUsageMonitor.Views.UsageOverlayWindow"
+        x:Name="OverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Seth's AI Usage Monitor"
@@ -236,8 +237,14 @@
             </ContextMenu>
         </Grid.ContextMenu>
 
-        <Border x:Name="ChromeBorder"
-                Style="{StaticResource OverlayChromeStyle}">
+        <Grid x:Name="OverlayScaleHost">
+            <Grid.LayoutTransform>
+                <ScaleTransform ScaleX="{Binding UiScale, ElementName=OverlayWindow}"
+                                ScaleY="{Binding UiScale, ElementName=OverlayWindow}" />
+            </Grid.LayoutTransform>
+
+            <Border x:Name="ChromeBorder"
+                    Style="{StaticResource OverlayChromeStyle}">
             <Border.Effect>
                 <DropShadowEffect BlurRadius="30"
                                   Direction="270"
@@ -669,7 +676,8 @@
                        DragDelta="ResizeThumbOnDragDelta"
                        DragCompleted="ResizeThumbOnDragCompleted" />
             </Grid>
-        </Border>
+            </Border>
+        </Grid>
 
         <Thumb Style="{StaticResource WindowResizeThumbStyle}"
                HorizontalAlignment="Right"

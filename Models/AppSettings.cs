@@ -5,11 +5,17 @@ public sealed class AppSettings
     public const int DefaultUpdateIntervalMinutes = 20;
     public const int MinimumUpdateIntervalMinutes = 1;
     public const int MaximumUpdateIntervalMinutes = 1440;
+    public const int DefaultUiScalePercent = 100;
+    public const int MinimumUiScalePercent = 80;
+    public const int MaximumUiScalePercent = 150;
+    public const int UiScaleStepPercent = 5;
     public const double DefaultCursorIncludedBudgetDollars = 20;
     public const string CursorUsageModePersonal = "PersonalSubscription";
     public const string CursorUsageModeTeamsApiKey = "TeamsApiKey";
 
     public int UpdateIntervalMinutes { get; set; } = DefaultUpdateIntervalMinutes;
+
+    public int UiScalePercent { get; set; } = DefaultUiScalePercent;
 
     public Dictionary<string, bool> EnabledProviders { get; set; } = CreateDefaultEnabledProviders();
 
@@ -34,6 +40,7 @@ public sealed class AppSettings
         return new AppSettings
         {
             UpdateIntervalMinutes = UpdateIntervalMinutes,
+            UiScalePercent = UiScalePercent,
             EnabledProviders = NormalizeEnabledProviders(EnabledProviders),
             CursorUsageMode = CursorUsageMode,
             CursorApiKey = CursorApiKey,
@@ -63,6 +70,8 @@ public sealed class AppSettings
             MinimumUpdateIntervalMinutes,
             MaximumUpdateIntervalMinutes);
 
+        UiScalePercent = NormalizeUiScalePercent(UiScalePercent);
+
         EnabledProviders = NormalizeEnabledProviders(EnabledProviders);
         CursorUsageMode = NormalizeCursorUsageMode();
 
@@ -75,6 +84,25 @@ public sealed class AppSettings
 
         OverlayWindowPlacement ??= new OverlayWindowPlacement();
         OverlayWindowPlacement.Normalize();
+    }
+
+    private static int NormalizeUiScalePercent(int uiScalePercent)
+    {
+        if (uiScalePercent <= 0)
+        {
+            return DefaultUiScalePercent;
+        }
+
+        var clampedScale = Math.Clamp(
+            uiScalePercent,
+            MinimumUiScalePercent,
+            MaximumUiScalePercent);
+        var stepCount = (int)Math.Round(
+            (clampedScale - MinimumUiScalePercent) / (double)UiScaleStepPercent,
+            MidpointRounding.AwayFromZero);
+        var steppedScale = MinimumUiScalePercent + stepCount * UiScaleStepPercent;
+
+        return Math.Clamp(steppedScale, MinimumUiScalePercent, MaximumUiScalePercent);
     }
 
     private string NormalizeCursorUsageMode()

@@ -31,6 +31,7 @@ public sealed class TrayIconService : IDisposable
     private CursorDashboardLoginWindow? _cursorDashboardLoginWindow;
     private CancellationTokenSource? _refreshCts;
     private bool _suppressNextCancellationLog;
+    private bool _suspendOverlayPlacementSave;
     private bool _disposed;
 
     public TrayIconService(UsageAggregatorService usageAggregatorService, AppSettingsService settingsService, AppLogService logService)
@@ -162,6 +163,7 @@ public sealed class TrayIconService : IDisposable
         {
             DataContext = _viewModel
         };
+        _overlayWindow.ApplyUiScalePercent(_settings.UiScalePercent);
         _overlayWindow.ApplyStartupPlacement(_settings.OverlayWindowPlacement);
         _overlayWindow.ReloadRequested += (_, _) => _ = ManualRefreshAsync();
         _overlayWindow.SettingsRequested += (_, _) => ShowSettings();
@@ -212,6 +214,11 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
+        if (_suspendOverlayPlacementSave)
+        {
+            return;
+        }
+
         _windowPlacementSaveTimer.Stop();
         _windowPlacementSaveTimer.Start();
     }
@@ -224,6 +231,11 @@ public sealed class TrayIconService : IDisposable
 
     private void SaveOverlayWindowPlacement()
     {
+        if (_suspendOverlayPlacementSave)
+        {
+            return;
+        }
+
         if (_overlayWindow is not null)
         {
             SaveOverlayWindowPlacement(_overlayWindow);
@@ -232,6 +244,11 @@ public sealed class TrayIconService : IDisposable
 
     private void SaveOverlayWindowPlacement(UsageOverlayWindow window)
     {
+        if (_suspendOverlayPlacementSave)
+        {
+            return;
+        }
+
         try
         {
             _settings.OverlayWindowPlacement = window.GetCurrentPlacement();
@@ -274,6 +291,9 @@ public sealed class TrayIconService : IDisposable
 
     private void ShowSettings()
     {
+        var previousSettings = _settings.Clone();
+        var originalUiScalePercent = _settings.UiScalePercent;
+        var originalOverlayPlacement = _overlayWindow?.GetCurrentPlacement() ?? _settings.OverlayWindowPlacement.Clone();
         var settingsWindow = new SettingsWindow(_settings, _settingsService, _logService);
 
         if (_overlayWindow?.IsVisible == true)
@@ -285,21 +305,122 @@ public sealed class TrayIconService : IDisposable
             settingsWindow.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
 
-        if (settingsWindow.ShowDialog() != true)
+        void SettingsWindowOnUiScalePreviewChanged(object? sender, UiScalePreviewChangedEventArgs e)
+        {
+            _overlayWindow?.ApplyUiScalePercent(e.UiScalePercent);
+        }
+
+        var saved = false;
+        BeginOverlayScalePreview();
+        settingsWindow.UiScalePreviewChanged += SettingsWindowOnUiScalePreviewChanged;
+
+        try
+        {
+            saved = settingsWindow.ShowDialog() == true;
+        }
+        finally
+        {
+            settingsWindow.UiScalePreviewChanged -= SettingsWindowOnUiScalePreviewChanged;
+
+            if (!saved)
+            {
+                RestoreOverlayScalePreview(originalUiScalePercent, originalOverlayPlacement);
+                EndOverlayScalePreview();
+            }
+        }
+
+        if (!saved)
         {
             return;
         }
 
         _settings = settingsWindow.Settings;
+        _overlayWindow?.ApplyUiScalePercent(_settings.UiScalePercent);
+        if (_overlayWindow is not null)
+        {
+            _settings.OverlayWindowPlacement = _overlayWindow.GetCurrentPlacement();
+        }
+
+        var nonScaleSettingsChanged = HasNonScaleSettingsChanged(previousSettings, _settings);
+        EndOverlayScalePreview();
         _settingsService.Save(_settings);
-        ApplyAutoRunSetting();
-        EnsureClaudeStatusExporterIfEnabled();
-        ConfigureRefreshTimer();
-        _viewModel.SetAutoRefreshInterval(_settings.UpdateIntervalMinutes);
+
+        if (nonScaleSettingsChanged)
+        {
+            ApplyAutoRunSetting();
+            EnsureClaudeStatusExporterIfEnabled();
+            ConfigureRefreshTimer();
+            _viewModel.SetAutoRefreshInterval(_settings.UpdateIntervalMinutes);
+        }
+
         _logService.Info("Settings", "Settings saved.");
         UpdateLogSummary();
 
-        _ = ManualRefreshAsync();
+        if (nonScaleSettingsChanged)
+        {
+            _ = ManualRefreshAsync();
+        }
+    }
+
+    private void BeginOverlayScalePreview()
+    {
+        _windowPlacementSaveTimer.Stop();
+        _suspendOverlayPlacementSave = true;
+    }
+
+    private void EndOverlayScalePreview()
+    {
+        _suspendOverlayPlacementSave = false;
+    }
+
+    private void RestoreOverlayScalePreview(int uiScalePercent, OverlayWindowPlacement placement)
+    {
+        if (_overlayWindow is null)
+        {
+            return;
+        }
+
+        _overlayWindow.ApplyUiScalePercent(uiScalePercent);
+        _overlayWindow.ApplyStartupPlacement(placement);
+    }
+
+    private static bool HasNonScaleSettingsChanged(AppSettings previousSettings, AppSettings nextSettings)
+    {
+        return previousSettings.UpdateIntervalMinutes != nextSettings.UpdateIntervalMinutes ||
+               previousSettings.ClaudeStatusExporterEnabled != nextSettings.ClaudeStatusExporterEnabled ||
+               previousSettings.AutoRunAtLoginEnabled != nextSettings.AutoRunAtLoginEnabled ||
+               !EnabledProvidersEqual(previousSettings.EnabledProviders, nextSettings.EnabledProviders) ||
+               !string.Equals(previousSettings.CursorUsageMode, nextSettings.CursorUsageMode, StringComparison.Ordinal) ||
+               !string.Equals(previousSettings.CursorApiKey, nextSettings.CursorApiKey, StringComparison.Ordinal) ||
+               Math.Abs(previousSettings.CursorIncludedBudgetDollars - nextSettings.CursorIncludedBudgetDollars) > 0.001 ||
+               !string.Equals(
+                   previousSettings.CursorDashboardCookieHeaderProtected,
+                   nextSettings.CursorDashboardCookieHeaderProtected,
+                   StringComparison.Ordinal) ||
+               previousSettings.CursorDashboardCookiesCapturedAt != nextSettings.CursorDashboardCookiesCapturedAt;
+    }
+
+    private static bool EnabledProvidersEqual(
+        IReadOnlyDictionary<string, bool> previousProviders,
+        IReadOnlyDictionary<string, bool> nextProviders)
+    {
+        var providerNames = previousProviders.Keys
+            .Concat(nextProviders.Keys)
+            .Where(providerName => !string.IsNullOrWhiteSpace(providerName))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var providerName in providerNames)
+        {
+            previousProviders.TryGetValue(providerName, out var previousEnabled);
+            nextProviders.TryGetValue(providerName, out var nextEnabled);
+
+            if (previousEnabled != nextEnabled)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void ApplyAutoRunSetting()
