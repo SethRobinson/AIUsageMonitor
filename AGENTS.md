@@ -11,6 +11,7 @@
   - `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --fake --scenario failure`
   - `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --fake --scenario cancel --cancel-after-ms 500`
 - Optional live diagnostics are opt-in only: `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --live --timeout-seconds 120`.
+- When the user says to bump the version, increment it by 0.01, for example `V1.02` becomes `V1.03`. Update both `Services\AppMetadata.cs` and the README download section's current version and latest updated date.
 - `package-release.bat` publishes a self-contained win-x64 single-file build, signs it, verifies the signature, copies `build\SethsAIUsageMonitor.exe`, and creates `artifacts\SethsAIUsageMonitor-win-x64.zip`.
 - Keep this `AGENTS.md` file updated whenever project workflow, architecture, test commands, diagnostics, packaging, signing, or release expectations change.
 - If the user says `commit`, stage only the correct task-related files and use a very brief commit message, one or two lines at most, that names each included feature or fix.

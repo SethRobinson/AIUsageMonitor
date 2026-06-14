@@ -10,7 +10,7 @@ The overlay changes content density as you resize it instead of simply shrinking
 
 # Download #
 
-Current version: V1.02, latest updated May 23, 2026.
+Current version: V1.03, latest updated June 14, 2026.
 
 **[Download for Windows - Code signed by me, Seth A. Robinson](https://rtsoft.com/files/SethsAIUsageMonitor-win-x64.zip)**
 
