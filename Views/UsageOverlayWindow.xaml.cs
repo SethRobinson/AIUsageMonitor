@@ -124,6 +124,25 @@ public partial class UsageOverlayWindow : Window
         ApplyStartupPlacement(GetCurrentPlacement());
     }
 
+    public void CenterOnPrimaryScreen()
+    {
+        var workArea = GetPrimaryScreenWorkArea();
+        if (workArea.IsEmpty)
+        {
+            EnsureValidPlacement();
+            return;
+        }
+
+        var width = CoerceDimension(GetCurrentDimension(ActualWidth, Width), Width, MinWidth, workArea.Width);
+        var height = CoerceDimension(GetCurrentDimension(ActualHeight, Height), Height, MinHeight, workArea.Height);
+
+        Width = width;
+        Height = height;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = Clamp(workArea.Left + (workArea.Width - width) / 2, workArea.Left, workArea.Right - width);
+        Top = Clamp(workArea.Top + (workArea.Height - height) / 2, workArea.Top, workArea.Bottom - height);
+    }
+
     public string DisplayMode
     {
         get => (string)GetValue(DisplayModeProperty);
@@ -482,6 +501,22 @@ public partial class UsageOverlayWindow : Window
             SystemParameters.VirtualScreenTop,
             SystemParameters.VirtualScreenWidth,
             SystemParameters.VirtualScreenHeight);
+    }
+
+    private static Rect GetPrimaryScreenWorkArea()
+    {
+        var workArea = SystemParameters.WorkArea;
+        if (!HasFiniteValue(workArea.Left) ||
+            !HasFiniteValue(workArea.Top) ||
+            !HasFiniteValue(workArea.Width) ||
+            !HasFiniteValue(workArea.Height) ||
+            workArea.Width <= 0 ||
+            workArea.Height <= 0)
+        {
+            return Rect.Empty;
+        }
+
+        return workArea;
     }
 
     private static double CoerceDimension(double? savedValue, double fallbackValue, double minimumValue, double maximumValue)

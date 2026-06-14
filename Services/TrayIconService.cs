@@ -130,10 +130,24 @@ public sealed class TrayIconService : IDisposable
 
     public void ShowOverlay()
     {
+        ShowOverlay(centerOnPrimaryScreen: false);
+    }
+
+    public void ShowOverlay(bool centerOnPrimaryScreen)
+    {
         EnsureOverlayWindow();
-        _overlayWindow!.EnsureValidPlacement();
+        if (centerOnPrimaryScreen)
+        {
+            _overlayWindow!.CenterOnPrimaryScreen();
+        }
+        else
+        {
+            _overlayWindow!.EnsureValidPlacement();
+        }
+
         _overlayWindow!.Show();
         _overlayWindow.Activate();
+        _overlayWindow.Focus();
     }
 
     private void EnsureOverlayWindow()

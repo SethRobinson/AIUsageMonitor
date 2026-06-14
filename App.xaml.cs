@@ -6,6 +6,7 @@ namespace AIUsageMonitor;
 public partial class App : System.Windows.Application
 {
     private TrayIconService? _trayIconService;
+    private SingleInstanceCoordinator? _singleInstanceCoordinator;
     private AppLogService? _logService;
 
     protected override void OnStartup(System.Windows.StartupEventArgs e)
@@ -34,9 +35,34 @@ public partial class App : System.Windows.Application
         }
 
         var logService = _logService;
+        _singleInstanceCoordinator = new SingleInstanceCoordinator(AppMetadata.StartupEntryName);
+        if (!_singleInstanceCoordinator.IsPrimaryInstance)
+        {
+            if (!_singleInstanceCoordinator.SignalExistingInstance())
+            {
+                logService.Warning("Startup", "Another instance is already running, but it could not be signaled.");
+            }
+
+            _singleInstanceCoordinator.Dispose();
+            _singleInstanceCoordinator = null;
+            Shutdown();
+            return;
+        }
+
         var settingsService = new AppSettingsService();
         _trayIconService = new TrayIconService(new UsageAggregatorService(logService, settingsService), settingsService, logService);
+        _singleInstanceCoordinator.StartListening(HandleSingleInstanceCommand);
         _trayIconService.ShowOverlay();
+    }
+
+    private void HandleSingleInstanceCommand(string command)
+    {
+        if (!string.Equals(command, SingleInstanceCoordinator.ShowCenterCommand, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(new Action(() => _trayIconService?.ShowOverlay(centerOnPrimaryScreen: true)));
     }
 
     private void RegisterGlobalExceptionHandlers()
@@ -72,6 +98,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(System.Windows.ExitEventArgs e)
     {
         _trayIconService?.Dispose();
+        _singleInstanceCoordinator?.Dispose();
         base.OnExit(e);
     }
 
