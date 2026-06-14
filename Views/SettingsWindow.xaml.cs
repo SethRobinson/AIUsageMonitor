@@ -84,9 +84,10 @@ public partial class SettingsWindow : Window
                 "https://docs.claude.com/en/docs/claude-code/setup"),
             KnownProviders.OpenAI => new ProviderSetupInfo(
                 "OpenAI Setup",
-                "Install the Codex CLI, run codex, and sign in. Seth's AI Usage Monitor reads quota snapshots from local Codex session logs.",
-                "Open Codex CLI setup",
-                "https://help.openai.com/en/articles/11096431"),
+                "Install the Codex CLI or Codex app, open Codex, and sign in. Seth's AI Usage Monitor reads quota snapshots from local Codex session logs.",
+                "Open Codex",
+                OpenAiCodexLauncherService.SetupUrl,
+                OpenCodex),
             KnownProviders.Antigravity => new ProviderSetupInfo(
                 "Antigravity Setup",
                 "Run Antigravity and sign in. Seth's AI Usage Monitor reads the local Antigravity language server quota while Antigravity is running.",
@@ -138,6 +139,32 @@ public partial class SettingsWindow : Window
                     owner,
                     $"Could not open Antigravity ({result.ExecutablePath}): {result.Exception?.Message}",
                     "Antigravity",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+        }
+    }
+
+    private static void OpenCodex(Window owner)
+    {
+        var result = OpenAiCodexLauncherService.TryLaunch();
+        switch (result.Status)
+        {
+            case OpenAiCodexLaunchStatus.Started:
+                return;
+            case OpenAiCodexLaunchStatus.NotFound:
+                System.Windows.MessageBox.Show(
+                    owner,
+                    "Could not find Codex CLI or the Codex app on this machine. Download and install Codex, then try again.",
+                    "OpenAI",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            case OpenAiCodexLaunchStatus.Failed:
+                System.Windows.MessageBox.Show(
+                    owner,
+                    $"Could not open {result.Target?.DisplayName}: {result.Exception?.Message}",
+                    "OpenAI",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
                 return;
