@@ -21,8 +21,9 @@ internal static class ScreenshotService
         }
 
         var viewModel = new UsageOverlayViewModel();
-        var snapshot = new UsageDataService().Load();
+        var snapshot = RebaseSnapshot(new UsageDataService().Load(), DateTimeOffset.Now);
         viewModel.ApplySnapshot(snapshot, "Sample data");
+        ApplyCheckingState(viewModel, snapshot);
 
         var window = new UsageOverlayWindow
         {
@@ -84,5 +85,64 @@ internal static class ScreenshotService
         {
             window.Close();
         }
+    }
+
+    private static UsageSnapshot RebaseSnapshot(UsageSnapshot snapshot, DateTimeOffset generatedAt)
+    {
+        var originalGeneratedAt = snapshot.GeneratedAt == default ? generatedAt : snapshot.GeneratedAt;
+
+        return new UsageSnapshot
+        {
+            GeneratedAt = generatedAt,
+            Source = snapshot.Source,
+            Providers = snapshot.Providers
+                .Select(provider => new ProviderUsage
+                {
+                    Name = provider.Name,
+                    PlanName = provider.PlanName,
+                    Source = provider.Source,
+                    StatusMessage = provider.StatusMessage,
+                    IsUnavailable = provider.IsUnavailable,
+                    LastCheckedAt = RebaseTime(provider.LastCheckedAt, originalGeneratedAt, generatedAt),
+                    Windows = provider.Windows
+                        .Select(window => new UsageWindow
+                        {
+                            Title = window.Title,
+                            Limit = window.Limit,
+                            Used = window.Used,
+                            Remaining = window.Remaining,
+                            ResetAt = RebaseTime(window.ResetAt, originalGeneratedAt, generatedAt),
+                            Detail = window.Detail
+                        })
+                        .ToList()
+                })
+                .ToList()
+        };
+    }
+
+    private static DateTimeOffset? RebaseTime(
+        DateTimeOffset? value,
+        DateTimeOffset originalGeneratedAt,
+        DateTimeOffset generatedAt)
+    {
+        return value is { } timestamp
+            ? generatedAt + (timestamp - originalGeneratedAt)
+            : null;
+    }
+
+    private static void ApplyCheckingState(UsageOverlayViewModel viewModel, UsageSnapshot snapshot)
+    {
+        foreach (var provider in snapshot.Providers.Where(IsCheckingProvider))
+        {
+            var card = viewModel.Providers.FirstOrDefault(candidate =>
+                string.Equals(candidate.ShortName, provider.Name, StringComparison.OrdinalIgnoreCase));
+            card?.SetChecking(true);
+        }
+    }
+
+    private static bool IsCheckingProvider(ProviderUsage provider)
+    {
+        return provider.IsUnavailable &&
+               provider.StatusMessage.Contains("checking", StringComparison.OrdinalIgnoreCase);
     }
 }

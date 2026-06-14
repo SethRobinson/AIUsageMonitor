@@ -9,16 +9,16 @@
       {
         "title": "5h",
         "limit": 100,
-        "used": 72,
-        "remaining": 28,
-        "resetAt": "2026-05-23T06:30:00+09:00"
+        "used": 1,
+        "remaining": 99,
+        "resetAt": "2026-05-23T05:30:00+09:00"
       },
       {
         "title": "7d",
         "limit": 100,
-        "used": 68,
-        "remaining": 32,
-        "resetAt": "2026-05-26T00:00:00+09:00"
+        "used": 12,
+        "remaining": 88,
+        "resetAt": "2026-05-23T02:05:00+09:00"
       }
       ]
     },
@@ -30,16 +30,16 @@
       {
         "title": "5h",
         "limit": 100,
-        "used": 64,
-        "remaining": 36,
-        "resetAt": "2026-05-23T09:00:00+09:00"
+        "used": 26,
+        "remaining": 74,
+        "resetAt": "2026-05-23T04:30:00+09:00"
       },
       {
         "title": "7d",
         "limit": 100,
-        "used": 93,
-        "remaining": 7,
-        "resetAt": "2026-05-25T09:00:00+09:00"
+        "used": 39,
+        "remaining": 61,
+        "resetAt": "2026-05-26T01:30:00+09:00"
       }
       ]
     },
@@ -47,25 +47,9 @@
       "name": "Antigravity",
       "planName": "Google AI Pro",
       "source": "Fake data",
-      "statusMessage": "Antigravity model quota from local language server.",
-      "windows": [
-      {
-        "title": "Gemini Pro",
-        "limit": 100,
-        "used": 100,
-        "remaining": 0,
-        "resetAt": "2026-05-23T04:05:00+09:00",
-        "detail": "Baseline exhausted across 2 model(s)"
-      },
-      {
-        "title": "Gemini Flash",
-        "limit": 100,
-        "used": 48,
-        "remaining": 52,
-        "resetAt": "2026-05-23T04:05:00+09:00",
-        "detail": "52% left across 3 model(s)"
-      }
-      ]
+      "statusMessage": "Checking usage data...",
+      "isUnavailable": true,
+      "windows": []
     },
     {
       "name": "Gemini",
@@ -73,18 +57,18 @@
       "source": "Fake data",
       "windows": [
       {
-        "title": "Daily",
+        "title": "Gemini Flash",
         "limit": 100,
-        "used": 30,
-        "remaining": 70,
-        "resetAt": "2026-05-23T05:45:00+09:00"
+        "used": 0,
+        "remaining": 100,
+        "resetAt": "2026-05-24T01:30:00+09:00"
       },
       {
-        "title": "Monthly",
+        "title": "Gemini Pro",
         "limit": 100,
-        "used": 41,
-        "remaining": 59,
-        "resetAt": "2026-05-27T00:00:00+09:00"
+        "used": 0,
+        "remaining": 100,
+        "resetAt": "2026-05-24T01:30:00+09:00"
       }
       ]
     },
@@ -94,18 +78,11 @@
       "source": "Fake data",
       "windows": [
       {
-        "title": "Monthly",
-        "limit": 100,
-        "used": 94,
-        "remaining": 6,
-        "resetAt": "2026-05-23T03:15:00+09:00"
-      },
-      {
         "title": "On-demand",
         "limit": 100,
-        "used": 77,
-        "remaining": 23,
-        "resetAt": "2026-05-28T00:00:00+09:00"
+        "used": 0,
+        "remaining": 100,
+        "resetAt": "2026-06-16T01:30:00+09:00"
       }
       ]
     }
