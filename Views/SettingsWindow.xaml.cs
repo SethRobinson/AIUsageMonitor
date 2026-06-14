@@ -91,7 +91,8 @@ public partial class SettingsWindow : Window
                 "Antigravity Setup",
                 "Run Antigravity and sign in. Seth's AI Usage Monitor reads the local Antigravity language server quota while Antigravity is running.",
                 "Open Antigravity",
-                "https://antigravity.google/"),
+                AntigravityLauncherService.DownloadUrl,
+                OpenAntigravity),
             KnownProviders.Gemini => new ProviderSetupInfo(
                 "Gemini Setup",
                 "Install Gemini CLI, run gemini, and sign in. Seth's AI Usage Monitor reads Gemini CLI credentials, Code Assist quota, quota status exports, and local session usage.",
@@ -109,11 +110,38 @@ public partial class SettingsWindow : Window
             setupInfo.Title,
             setupInfo.Message,
             setupInfo.LinkText,
-            setupInfo.Url)
+            setupInfo.Url,
+            setupInfo.LinkAction)
         {
             Owner = this
         };
         setupWindow.ShowDialog();
+    }
+
+    private static void OpenAntigravity(Window owner)
+    {
+        var result = AntigravityLauncherService.TryLaunch();
+        switch (result.Status)
+        {
+            case AntigravityLaunchStatus.Started:
+                return;
+            case AntigravityLaunchStatus.NotFound:
+                System.Windows.MessageBox.Show(
+                    owner,
+                    "Could not find Antigravity on this machine. Download and install Antigravity, then try again.",
+                    "Antigravity",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            case AntigravityLaunchStatus.Failed:
+                System.Windows.MessageBox.Show(
+                    owner,
+                    $"Could not open Antigravity ({result.ExecutablePath}): {result.Exception?.Message}",
+                    "Antigravity",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+        }
     }
 
     private void AboutButtonOnClick(object sender, RoutedEventArgs e)
@@ -158,5 +186,10 @@ public partial class SettingsWindow : Window
         Settings.CursorDashboardCookiesCapturedAt = savedSettings.CursorDashboardCookiesCapturedAt;
     }
 
-    private sealed record ProviderSetupInfo(string Title, string Message, string LinkText, string Url);
+    private sealed record ProviderSetupInfo(
+        string Title,
+        string Message,
+        string LinkText,
+        string Url,
+        Action<Window>? LinkAction = null);
 }
