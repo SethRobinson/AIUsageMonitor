@@ -484,8 +484,10 @@
                                                                         <ColumnDefinition Width="Auto" />
                                                                     </Grid.ColumnDefinitions>
                                                                     <TextBlock Text="{Binding LimitText}"
+                                                                               Margin="0,0,12,0"
                                                                                Foreground="#A8AFBA"
-                                                                               FontSize="12" />
+                                                                               FontSize="12"
+                                                                               TextTrimming="CharacterEllipsis" />
                                                                     <StackPanel Grid.Column="1"
                                                                                 Orientation="Horizontal"
                                                                                 HorizontalAlignment="Right">

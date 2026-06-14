@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using AIUsageMonitor.Models;
 using AIUsageMonitor.ViewModels;
 using AIUsageMonitor.Views;
 
@@ -41,6 +42,8 @@ internal static class ScreenshotService
         {
             window.Height = requestedHeight.Value;
         }
+
+        window.ApplyUiScalePercent(AppSettings.DefaultUiScalePercent);
 
         try
         {
