@@ -30,7 +30,7 @@ public partial class UsageOverlayWindow : Window
     private const double CompactMinimumVerticalInset = 36;
     private const double CompactMinimumRowHeight = 100;
     private const double MiniMinimumVerticalInset = 22;
-    private const double MiniMinimumRowHeight = 36;
+    private const double MiniMinimumRowHeight = 38;
     private const double MiniHorizontalChromeInset = 54;
     private const double CompactHorizontalChromeInset = 28;
     private const double CompactButtonsHorizontalInset = 180;
