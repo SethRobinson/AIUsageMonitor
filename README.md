@@ -25,6 +25,7 @@ This is app was stupid easy to make, so you have a need for it, you undoubtely c
 - Always-on-top overlay with percentage remaining, reset times, plan names, and per-provider last checked status.
 - Supports Anthropic, OpenAI/Codex, Antigravity, Gemini, and Cursor local usage checks.
 - Tray controls for show/hide, refresh now, settings, logs, and exit.
+- Layout adjusts as you drag the size to fit more or less info, UI scale slider in its Settings
 - Provider errors go to copyable logs and use backoff to avoid hammering services.
 - Build from VS Code with `dotnet build`; run with `dotnet run --project AIUsageMonitor.csproj`.
 - Build a standalone Windows x64 zip with `package-release.bat`.
