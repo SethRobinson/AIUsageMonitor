@@ -230,8 +230,7 @@ public sealed class TrayIconService : IDisposable
 
     private async Task ManualRefreshAsync()
     {
-        _usageAggregatorService.ResetBackoff();
-        await RefreshUsageAsync(force: true);
+        await RefreshUsageAsync(force: true, resetBackoff: true);
         RestartRefreshTimer();
     }
 
@@ -317,7 +316,7 @@ public sealed class TrayIconService : IDisposable
         }
     }
 
-    private async Task RefreshUsageAsync(bool force)
+    private async Task RefreshUsageAsync(bool force, bool resetBackoff = false)
     {
         if (_disposed)
         {
@@ -344,14 +343,24 @@ public sealed class TrayIconService : IDisposable
 
         try
         {
-            _viewModel.SetChecking(_usageAggregatorService.ProviderNames);
-            var snapshot = await _usageAggregatorService.CollectAsync(refreshCts.Token);
-            if (_disposed)
+            if (resetBackoff)
             {
-                return;
+                _usageAggregatorService.ResetBackoff();
             }
 
-            _viewModel.ApplySnapshot(snapshot, snapshot.Source);
+            _viewModel.SetChecking(_usageAggregatorService.ProviderNames);
+            await foreach (var provider in _usageAggregatorService.CollectIncrementalAsync(refreshCts.Token))
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _viewModel.ApplyProvider(provider, "Live/local collectors");
+                UpdateLogSummary();
+            }
+
+            _viewModel.SetSnapshotMetadata(DateTimeOffset.Now, "Live/local collectors");
             UpdateLogSummary();
         }
         catch (OperationCanceledException ex)
@@ -359,6 +368,7 @@ public sealed class TrayIconService : IDisposable
             if (!_disposed && !_suppressNextCancellationLog)
             {
                 _logService.Warning("Refresh", $"Usage collection timed out or was canceled: {ex.Message}");
+                _viewModel.ClearChecking();
                 _viewModel.SetError("Usage collection timed out. Details were added to the log.", "Live/local collectors");
                 UpdateLogSummary();
             }
@@ -368,6 +378,7 @@ public sealed class TrayIconService : IDisposable
         catch (Exception ex)
         {
             _logService.Error("Refresh", $"{ex.GetType().Name}: {ex.Message}");
+            _viewModel.ClearChecking();
             _viewModel.SetError("Usage collection failed. Details were added to the log.", "Live/local collectors");
             UpdateLogSummary();
         }

@@ -76,6 +76,32 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
         ErrorMessage = string.Empty;
     }
 
+    public void ApplyProvider(ProviderUsage provider, string dataPath)
+    {
+        var card = new ProviderUsageCard(provider);
+        var existingIndex = FindProviderIndex(provider.Name);
+
+        if (existingIndex >= 0)
+        {
+            Providers[existingIndex] = card;
+        }
+        else
+        {
+            Providers.Add(card);
+            OnPropertyChanged(nameof(HasProviders));
+        }
+
+        SourcePathText = string.IsNullOrWhiteSpace(provider.Source) ? dataPath : provider.Source;
+        ErrorMessage = string.Empty;
+    }
+
+    public void SetSnapshotMetadata(DateTimeOffset generatedAt, string dataPath)
+    {
+        GeneratedAtText = $"Updated {generatedAt.ToLocalTime():MMM d, yyyy h:mm tt}";
+        SourcePathText = dataPath;
+        ErrorMessage = string.Empty;
+    }
+
     public void SetChecking(IEnumerable<string> providerNames)
     {
         var names = providerNames.ToList();
@@ -112,6 +138,14 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
         }
     }
 
+    public void ClearChecking()
+    {
+        foreach (var provider in Providers)
+        {
+            provider.SetChecking(false);
+        }
+    }
+
     private bool ProviderListChanged(IReadOnlyCollection<string> providerNames)
     {
         if (Providers.Count != providerNames.Count)
@@ -124,6 +158,19 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         return providerNames.Any(providerName => !existingProviderNames.Contains(providerName));
+    }
+
+    private int FindProviderIndex(string providerName)
+    {
+        for (var index = 0; index < Providers.Count; index++)
+        {
+            if (string.Equals(Providers[index].ShortName, providerName, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     public void RefreshRelativeTimes()

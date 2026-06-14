@@ -1,5 +1,7 @@
 using AIUsageMonitor.Collectors;
 using AIUsageMonitor.Models;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -12,12 +14,16 @@ public sealed class UsageAggregatorService
     private readonly AppLogService _logService;
     private readonly AppSettingsService _settingsService;
     private readonly Dictionary<string, CollectorFailureState> _failureStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _failureStateLock = new();
 
-    public UsageAggregatorService(AppLogService logService, AppSettingsService settingsService)
+    public UsageAggregatorService(
+        AppLogService logService,
+        AppSettingsService settingsService,
+        IReadOnlyList<IUsageCollector>? collectors = null)
     {
         _logService = logService;
         _settingsService = settingsService;
-        _collectors =
+        _collectors = collectors ??
         [
             new ClaudeStatusFileUsageCollector(),
             new CodexLogUsageCollector(),
@@ -33,59 +39,74 @@ public sealed class UsageAggregatorService
 
     public void ResetBackoff()
     {
-        _failureStates.Clear();
+        lock (_failureStateLock)
+        {
+            _failureStates.Clear();
+        }
     }
 
     public async Task<UsageSnapshot> CollectAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTimeOffset.Now;
-        var providers = new List<ProviderUsage>();
-        var settings = _settingsService.Load();
-        var enabledCollectors = GetEnabledCollectors(settings).ToList();
-        RemoveDisabledFailureStates(enabledCollectors);
+        var providerNames = ProviderNames;
+        var providersByName = new ConcurrentDictionary<string, ProviderUsage>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var collector in enabledCollectors)
+        await foreach (var provider in CollectIncrementalAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (_failureStates.TryGetValue(collector.ProviderName, out var state) && state.NextRetryAt > now)
-            {
-                var backoffProvider = ProviderUsageFactory.Unavailable(
-                    collector.ProviderName,
-                    $"Collection paused until {state.NextRetryAt.ToLocalTime():h:mm tt} after the last error.",
-                    "Backoff");
-                backoffProvider.LastCheckedAt = state.LastAttemptAt;
-                providers.Add(backoffProvider);
-                continue;
-            }
+            providersByName[provider.Name] = provider;
+        }
 
-            try
-            {
-                var provider = await collector.CollectAsync(cancellationToken);
-                provider.LastCheckedAt = DateTimeOffset.Now;
-                providers.Add(provider);
+        var providers = providerNames
+            .Select(providerName => providersByName.TryGetValue(providerName, out var provider) ? provider : null)
+            .Where(provider => provider is not null)
+            .Cast<ProviderUsage>()
+            .ToList();
 
-                if (!provider.IsUnavailable)
-                {
-                    _failureStates.Remove(collector.ProviderName);
-                }
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
-            {
-                var nextRetryAt = RecordFailure(collector.ProviderName, now, ex);
-                var failedProvider = ProviderUsageFactory.Unavailable(
-                    collector.ProviderName,
-                    $"Collection failed. Next retry after {nextRetryAt.ToLocalTime():h:mm tt}.",
-                    "Error");
-                failedProvider.LastCheckedAt = now;
-                providers.Add(failedProvider);
-            }
+        foreach (var provider in providersByName.Values.Where(provider =>
+            !providerNames.Contains(provider.Name, StringComparer.OrdinalIgnoreCase)))
+        {
+            providers.Add(provider);
         }
 
         return new UsageSnapshot
         {
-            GeneratedAt = now,
+            GeneratedAt = DateTimeOffset.Now,
             Source = "Live/local collectors",
             Providers = providers
         };
+    }
+
+    public async IAsyncEnumerable<ProviderUsage> CollectIncrementalAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var settings = _settingsService.Load();
+        var enabledCollectors = GetEnabledCollectors(settings).ToList();
+        RemoveDisabledFailureStates(enabledCollectors);
+
+        var pendingTasks = enabledCollectors
+            .Select(collector => Task.Run(
+                () => CollectProviderAsync(collector, cancellationToken),
+                CancellationToken.None))
+            .ToList();
+        var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+
+        while (pendingTasks.Count > 0)
+        {
+            var completedTask = await Task
+                .WhenAny(pendingTasks.Cast<Task>().Append(cancellationTask))
+                .ConfigureAwait(false);
+
+            if (ReferenceEquals(completedTask, cancellationTask))
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+
+            var providerTask = (Task<ProviderUsage>)completedTask;
+            pendingTasks.Remove(providerTask);
+
+            yield return await providerTask.ConfigureAwait(false);
+        }
     }
 
     private IEnumerable<IUsageCollector> GetEnabledCollectors(AppSettings settings)
@@ -99,23 +120,99 @@ public sealed class UsageAggregatorService
             .Select(collector => collector.ProviderName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var providerName in _failureStates.Keys.ToList())
+        lock (_failureStateLock)
         {
-            if (!enabledProviderNames.Contains(providerName))
+            foreach (var providerName in _failureStates.Keys.ToList())
             {
-                _failureStates.Remove(providerName);
+                if (!enabledProviderNames.Contains(providerName))
+                {
+                    _failureStates.Remove(providerName);
+                }
             }
+        }
+    }
+
+    private async Task<ProviderUsage> CollectProviderAsync(IUsageCollector collector, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.Now;
+        if (TryCreateBackoffProvider(collector.ProviderName, now, out var backoffProvider))
+        {
+            return backoffProvider;
+        }
+
+        try
+        {
+            var provider = await collector.CollectAsync(cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            provider.LastCheckedAt = DateTimeOffset.Now;
+            if (!provider.IsUnavailable)
+            {
+                ClearFailure(collector.ProviderName);
+            }
+
+            return provider;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var nextRetryAt = RecordFailure(collector.ProviderName, now, ex);
+            var failedProvider = ProviderUsageFactory.Unavailable(
+                collector.ProviderName,
+                $"Collection failed. Next retry after {nextRetryAt.ToLocalTime():h:mm tt}.",
+                "Error");
+            failedProvider.LastCheckedAt = now;
+            return failedProvider;
+        }
+    }
+
+    private bool TryCreateBackoffProvider(string providerName, DateTimeOffset now, out ProviderUsage provider)
+    {
+        lock (_failureStateLock)
+        {
+            if (_failureStates.TryGetValue(providerName, out var state) && state.NextRetryAt > now)
+            {
+                provider = ProviderUsageFactory.Unavailable(
+                    providerName,
+                    $"Collection paused until {state.NextRetryAt.ToLocalTime():h:mm tt} after the last error.",
+                    "Backoff");
+                provider.LastCheckedAt = state.LastAttemptAt;
+                return true;
+            }
+        }
+
+        provider = null!;
+        return false;
+    }
+
+    private void ClearFailure(string providerName)
+    {
+        lock (_failureStateLock)
+        {
+            _failureStates.Remove(providerName);
         }
     }
 
     private DateTimeOffset RecordFailure(string providerName, DateTimeOffset now, Exception ex)
     {
-        _failureStates.TryGetValue(providerName, out var state);
-        var failures = (state?.FailureCount ?? 0) + 1;
-        var delayMinutes = Math.Min(60, Math.Pow(2, Math.Min(failures - 1, 5)) * 5);
-        var nextRetryAt = now.AddMinutes(delayMinutes);
+        DateTimeOffset nextRetryAt;
+        double delayMinutes;
 
-        _failureStates[providerName] = new CollectorFailureState(failures, nextRetryAt, now);
+        lock (_failureStateLock)
+        {
+            _failureStates.TryGetValue(providerName, out var state);
+            var failures = (state?.FailureCount ?? 0) + 1;
+            delayMinutes = Math.Min(60, Math.Pow(2, Math.Min(failures - 1, 5)) * 5);
+            nextRetryAt = now.AddMinutes(delayMinutes);
+
+            _failureStates[providerName] = new CollectorFailureState(failures, nextRetryAt, now);
+        }
+
         _logService.Error(providerName, $"{ex.GetType().Name}: {ex.Message}. Backing off for {delayMinutes:0} minutes.");
         return nextRetryAt;
     }

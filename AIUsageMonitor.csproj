@@ -12,6 +12,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="tests\**\*.cs;tools\**\*.cs" />
+    <EmbeddedResource Remove="tests\**\*;tools\**\*" />
+    <None Remove="tests\**\*;tools\**\*" />
+    <Page Remove="tests\**\*.xaml;tools\**\*.xaml" />
+
     <!--
       Disable WPF pen/tablet/touch support. WPF loads penimc_cor3.dll through a custom
       activation context that does not work with single-file self-extracting publishes,

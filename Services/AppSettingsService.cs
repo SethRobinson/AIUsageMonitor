@@ -18,10 +18,12 @@ public sealed class AppSettingsService
 
     public string SettingsPath { get; }
 
-    public AppSettingsService()
+    public AppSettingsService(string? baseDirectory = null)
     {
-        var currentDirectoryPath = Path.Combine(Environment.CurrentDirectory, FileName);
-        var outputDirectoryPath = Path.Combine(AppContext.BaseDirectory, FileName);
+        var currentDirectoryPath = Path.Combine(baseDirectory ?? Environment.CurrentDirectory, FileName);
+        var outputDirectoryPath = baseDirectory is null
+            ? Path.Combine(AppContext.BaseDirectory, FileName)
+            : currentDirectoryPath;
 
         SettingsPath = File.Exists(outputDirectoryPath)
             ? outputDirectoryPath

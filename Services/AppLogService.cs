@@ -10,10 +10,12 @@ public sealed class AppLogService
     private const string FileName = "monitor.log.jsonl";
     private const int MaxEntriesInMemory = 300;
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = false };
+    private readonly object _entriesLock = new();
+    private readonly object _fileLock = new();
 
-    public AppLogService()
+    public AppLogService(string? baseDirectory = null)
     {
-        LogPath = Path.Combine(Environment.CurrentDirectory, FileName);
+        LogPath = Path.Combine(baseDirectory ?? Environment.CurrentDirectory, FileName);
         LoadRecentEntries();
     }
 
@@ -21,7 +23,13 @@ public sealed class AppLogService
 
     public ObservableCollection<AppLogEntry> Entries { get; } = [];
 
-    public int RecentErrorCount => Entries.Count(entry => entry.Level is "Error" or "Warning");
+    public int RecentErrorCount => RunOnEntriesThread(() =>
+    {
+        lock (_entriesLock)
+        {
+            return Entries.Count(entry => entry.Level is "Error" or "Warning");
+        }
+    });
 
     public void Info(string source, string message) => Add("Info", source, message);
 
@@ -31,11 +39,20 @@ public sealed class AppLogService
 
     public void Clear()
     {
-        Entries.Clear();
+        RunOnEntriesThread(() =>
+        {
+            lock (_entriesLock)
+            {
+                Entries.Clear();
+            }
+        });
 
         try
         {
-            File.WriteAllText(LogPath, string.Empty);
+            lock (_fileLock)
+            {
+                File.WriteAllText(LogPath, string.Empty);
+            }
         }
         catch (IOException)
         {
@@ -55,22 +72,33 @@ public sealed class AppLogService
             Message = message
         };
 
-        Entries.Insert(0, entry);
-
-        while (Entries.Count > MaxEntriesInMemory)
-        {
-            Entries.RemoveAt(Entries.Count - 1);
-        }
+        RunOnEntriesThread(() => AddEntryToMemory(entry));
 
         try
         {
-            File.AppendAllText(LogPath, JsonSerializer.Serialize(entry, SerializerOptions) + Environment.NewLine);
+            lock (_fileLock)
+            {
+                File.AppendAllText(LogPath, JsonSerializer.Serialize(entry, SerializerOptions) + Environment.NewLine);
+            }
         }
         catch (IOException)
         {
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    private void AddEntryToMemory(AppLogEntry entry)
+    {
+        lock (_entriesLock)
+        {
+            Entries.Insert(0, entry);
+
+            while (Entries.Count > MaxEntriesInMemory)
+            {
+                Entries.RemoveAt(Entries.Count - 1);
+            }
         }
     }
 
@@ -93,13 +121,48 @@ public sealed class AppLogService
                 var entry = JsonSerializer.Deserialize<AppLogEntry>(lines[index]);
                 if (entry is not null)
                 {
-                    Entries.Add(entry);
+                    lock (_entriesLock)
+                    {
+                        Entries.Add(entry);
+                    }
                 }
             }
         }
         catch
         {
-            Entries.Clear();
+            lock (_entriesLock)
+            {
+                Entries.Clear();
+            }
         }
+    }
+
+    private static void RunOnEntriesThread(Action action)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null &&
+            !dispatcher.CheckAccess() &&
+            !dispatcher.HasShutdownStarted &&
+            !dispatcher.HasShutdownFinished)
+        {
+            dispatcher.Invoke(action);
+            return;
+        }
+
+        action();
+    }
+
+    private static T RunOnEntriesThread<T>(Func<T> action)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null &&
+            !dispatcher.CheckAccess() &&
+            !dispatcher.HasShutdownStarted &&
+            !dispatcher.HasShutdownFinished)
+        {
+            return dispatcher.Invoke(action);
+        }
+
+        return action();
     }
 }
