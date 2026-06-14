@@ -11,6 +11,11 @@
   - `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --fake --scenario failure`
   - `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --fake --scenario cancel --cancel-after-ms 500`
 - Optional live diagnostics are opt-in only: `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --live --timeout-seconds 120`.
+- README screenshots are generated from `usage.fake.json` with the app's built-in screenshot mode, which defaults to 100% UI scale. Regenerate them with:
+  - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot .\docs\screenshot-full.png --screenshot-size 1280x740`
+  - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot .\docs\screenshot-compact.png --screenshot-size 1360x136`
+  - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot .\docs\screenshot-mini-strip.png --screenshot-size 760x60`
+  - `Copy-Item .\docs\screenshot-full.png .\docs\screenshot.png -Force`
 - When the user says to bump the version, increment it by 0.01, for example `V1.02` becomes `V1.03`. Update both `Services\AppMetadata.cs` and the README download section's current version and latest updated date.
 - `package-release.bat` publishes a self-contained win-x64 single-file build, signs it, verifies the signature, copies `build\SethsAIUsageMonitor.exe`, and creates `artifacts\SethsAIUsageMonitor-win-x64.zip`.
 - Keep this `AGENTS.md` file updated whenever project workflow, architecture, test commands, diagnostics, packaging, signing, or release expectations change.
