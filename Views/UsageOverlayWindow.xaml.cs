@@ -1,7 +1,9 @@
 using System.Collections.Specialized;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using AIUsageMonitor.Models;
@@ -33,6 +35,10 @@ public partial class UsageOverlayWindow : Window
     private const double CompactHorizontalChromeInset = 28;
     private const double CompactButtonsHorizontalInset = 180;
     private const double HeightTrimTolerance = 1;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoActivate = 0x0010;
+    private static readonly IntPtr HwndTopmost = new(-1);
 
     public static readonly DependencyProperty DisplayModeProperty = DependencyProperty.Register(
         nameof(DisplayMode),
@@ -78,8 +84,25 @@ public partial class UsageOverlayWindow : Window
     {
         InitializeComponent();
         Loaded += WindowOnLoaded;
+        IsVisibleChanged += WindowOnIsVisibleChanged;
         SizeChanged += WindowOnSizeChanged;
         DataContextChanged += WindowOnDataContextChanged;
+    }
+
+    internal void EnsureTopmost()
+    {
+        if (!Topmost || !IsVisible)
+        {
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        SetWindowPos(handle, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
     }
 
     public void ApplyStartupPlacement(OverlayWindowPlacement? placement)
@@ -176,6 +199,7 @@ public partial class UsageOverlayWindow : Window
     {
         Show();
         Activate();
+        EnsureTopmost();
     }
 
     private void RefreshMenuItemOnClick(object sender, RoutedEventArgs e)
@@ -279,6 +303,15 @@ public partial class UsageOverlayWindow : Window
     private void WindowOnLoaded(object sender, RoutedEventArgs e)
     {
         QueueResponsiveLayoutUpdate();
+        EnsureTopmost();
+    }
+
+    private void WindowOnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (IsVisible)
+        {
+            Dispatcher.BeginInvoke(new Action(EnsureTopmost), DispatcherPriority.Loaded);
+        }
     }
 
     private void WindowOnSizeChanged(object sender, SizeChangedEventArgs e)
@@ -607,6 +640,10 @@ public partial class UsageOverlayWindow : Window
         {
             // DragMove can throw if the mouse capture changes during the drag.
         }
+        finally
+        {
+            EnsureTopmost();
+        }
     }
 
     private void WindowOnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -627,6 +664,22 @@ public partial class UsageOverlayWindow : Window
 
         base.OnClosed(e);
     }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        EnsureTopmost();
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
 
     private static bool IsInteractiveElement(DependencyObject? source)
     {

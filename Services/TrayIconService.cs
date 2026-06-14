@@ -148,6 +148,7 @@ public sealed class TrayIconService : IDisposable
         _overlayWindow!.Show();
         _overlayWindow.Activate();
         _overlayWindow.Focus();
+        _overlayWindow.EnsureTopmost();
     }
 
     private void EnsureOverlayWindow()
