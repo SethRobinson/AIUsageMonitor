@@ -66,4 +66,25 @@ public sealed class AppSettingsTests
 
         Assert.AreEqual(settings.UiScalePercent, clone.UiScalePercent);
     }
+
+    [TestMethod]
+    public void DiagnosticLoggingEnabledDefaultsToFalse()
+    {
+        var settings = new AppSettings();
+
+        Assert.IsFalse(settings.DiagnosticLoggingEnabled);
+    }
+
+    [TestMethod]
+    public void CloneCopiesDiagnosticLoggingEnabled()
+    {
+        var settings = new AppSettings
+        {
+            DiagnosticLoggingEnabled = true
+        };
+
+        var clone = settings.Clone();
+
+        Assert.IsTrue(clone.DiagnosticLoggingEnabled);
+    }
 }

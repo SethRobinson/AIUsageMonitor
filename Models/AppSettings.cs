@@ -33,6 +33,8 @@ public sealed class AppSettings
 
     public bool AutoRunAtLoginEnabled { get; set; }
 
+    public bool DiagnosticLoggingEnabled { get; set; }
+
     public OverlayWindowPlacement OverlayWindowPlacement { get; set; } = new();
 
     public AppSettings Clone()
@@ -49,6 +51,7 @@ public sealed class AppSettings
             CursorDashboardCookiesCapturedAt = CursorDashboardCookiesCapturedAt,
             ClaudeStatusExporterEnabled = ClaudeStatusExporterEnabled,
             AutoRunAtLoginEnabled = AutoRunAtLoginEnabled,
+            DiagnosticLoggingEnabled = DiagnosticLoggingEnabled,
             OverlayWindowPlacement = OverlayWindowPlacement?.Clone() ?? new OverlayWindowPlacement()
         };
     }

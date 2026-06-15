@@ -1,6 +1,9 @@
+using System.Globalization;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using AIUsageMonitor.Models;
+using AIUsageMonitor.Services;
 
 namespace AIUsageMonitor.Collectors;
 
@@ -10,15 +13,30 @@ public sealed class CodexLogUsageCollector : IUsageCollector
     private static readonly TimeSpan CommandFailureBackoff = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan CommandUnavailableBackoff = TimeSpan.FromHours(1);
     private static readonly TimeSpan UnknownExhaustionBackoff = TimeSpan.FromMinutes(30);
+    private readonly AppLogService? _logService;
+    private readonly AppSettingsService? _settingsService;
     private DateTimeOffset _nextCommandRefreshAt = DateTimeOffset.MinValue;
     private string _commandRefreshPauseMessage = string.Empty;
+
+    public CodexLogUsageCollector(AppLogService? logService = null, AppSettingsService? settingsService = null)
+    {
+        _logService = logService;
+        _settingsService = settingsService;
+    }
 
     public string ProviderName => KnownProviders.OpenAI;
 
     public async Task<ProviderUsage> CollectAsync(CancellationToken cancellationToken)
     {
+        var diagnosticsEnabled = IsDiagnosticLoggingEnabled();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var sessionsDirectory = Path.Combine(home, ".codex", "sessions");
+
+        if (diagnosticsEnabled)
+        {
+            LogDiagnostic(BuildEnvironmentDiagnostic(sessionsDirectory));
+        }
+
         var latest = TryReadLatestSnapshot(sessionsDirectory, cancellationToken);
         var now = DateTimeOffset.Now;
         var refreshNote = string.Empty;
@@ -31,7 +49,9 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         else if (ShouldRunCommandRefresh(latest, now))
         {
             var previousTimestamp = latest?.Timestamp;
-            var refreshResult = await CliQuotaRefreshRunner.RefreshCodexAsync(cancellationToken);
+            var refreshResult = await CliQuotaRefreshRunner.RefreshCodexAsync(
+                cancellationToken,
+                diagnosticsEnabled ? LogDiagnostic : null);
             latest = TryReadLatestSnapshot(sessionsDirectory, cancellationToken);
             now = DateTimeOffset.Now;
 
@@ -58,6 +78,11 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         else if (_nextCommandRefreshAt > now && !string.IsNullOrWhiteSpace(_commandRefreshPauseMessage))
         {
             refreshNote = $"{_commandRefreshPauseMessage} Next command retry after {_nextCommandRefreshAt.ToLocalTime():h:mm tt}.";
+        }
+
+        if (diagnosticsEnabled)
+        {
+            LogDiagnostic(BuildSnapshotDiagnostic(latest, now, refreshNote));
         }
 
         if (latest is null)
@@ -102,7 +127,7 @@ public sealed class CodexLogUsageCollector : IUsageCollector
 
                 if (latest is null || snapshot.Timestamp > latest.Timestamp)
                 {
-                    latest = snapshot;
+                    latest = snapshot with { SourceFile = file };
                 }
             }
         }
@@ -366,11 +391,97 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         _commandRefreshPauseMessage = message;
     }
 
+    private bool IsDiagnosticLoggingEnabled()
+    {
+        if (_logService is null || _settingsService is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _settingsService.Load().DiagnosticLoggingEnabled;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private void LogDiagnostic(string message)
+    {
+        try
+        {
+            _logService?.Error("Codex Diagnostics", message);
+        }
+        catch (Exception)
+        {
+            // Diagnostic logging must never break usage collection.
+        }
+    }
+
+    private static string BuildEnvironmentDiagnostic(string sessionsDirectory)
+    {
+        return $"env: culture={CultureInfo.CurrentCulture.Name}, uiCulture={CultureInfo.CurrentUICulture.Name}, " +
+            $"consoleOut={DescribeEncoding(Console.OutputEncoding)}, consoleIn={DescribeEncoding(Console.InputEncoding)}, " +
+            $"timeZone={TimeZoneInfo.Local.Id} (UTC{DateTimeOffset.Now:zzz}), " +
+            $"sessionsDir={sessionsDirectory}, dirExists={Directory.Exists(sessionsDirectory)}.";
+    }
+
+    private static string DescribeEncoding(Encoding encoding)
+    {
+        return $"{encoding.WebName} (cp{encoding.CodePage})";
+    }
+
+    private string BuildSnapshotDiagnostic(CodexRateLimitSnapshot? latest, DateTimeOffset now, string refreshNote)
+    {
+        var builder = new StringBuilder();
+
+        if (latest is null)
+        {
+            builder.AppendLine("snapshot: none selected.");
+        }
+        else
+        {
+            var ageMinutes = (now - latest.Timestamp).TotalMinutes;
+            builder.AppendLine(
+                $"snapshot: timestampUtc={latest.Timestamp.ToUniversalTime():yyyy-MM-ddTHH:mm:ssZ}, " +
+                $"ageMinutes={ageMinutes:0.0}, plan={latest.PlanType ?? "(none)"}, file={latest.SourceFile ?? "(unknown)"}.");
+            AppendWindowDiagnostic(builder, "primary", latest.Primary, now);
+            AppendWindowDiagnostic(builder, "secondary", latest.Secondary, now);
+        }
+
+        builder.Append(
+            $"refreshNote: {(string.IsNullOrWhiteSpace(refreshNote) ? "(none)" : refreshNote)}; " +
+            $"nextCommandRefreshAt={_nextCommandRefreshAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}.");
+        return builder.ToString();
+    }
+
+    private static void AppendWindowDiagnostic(StringBuilder builder, string label, CodexWindow? window, DateTimeOffset now)
+    {
+        if (window is null)
+        {
+            builder.AppendLine($"{label}: (none)");
+            return;
+        }
+
+        var resetInfo = window.ResetsAt is { } resetsAt
+            ? $"resetsAtUnix={resetsAt.ToUnixTimeSeconds()}, resetsAtLocal={resetsAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}, " +
+              $"minutesUntilReset={(resetsAt - now).TotalMinutes:0.0}"
+            : "resetsAt=(none)";
+        builder.AppendLine(
+            $"{label}: title={WindowTitle(window.WindowMinutes)}, usedPercent={window.UsedPercent.ToString("0.##", CultureInfo.InvariantCulture)}, " +
+            $"windowMinutes={window.WindowMinutes}, {resetInfo}");
+    }
+
     private sealed record CodexRateLimitSnapshot(
         DateTimeOffset Timestamp,
         CodexWindow? Primary,
         CodexWindow? Secondary,
-        string? PlanType);
+        string? PlanType)
+    {
+        public string? SourceFile { get; init; }
+    }
 
     private sealed record CodexWindow(double UsedPercent, int WindowMinutes, DateTimeOffset? ResetsAt);
 }

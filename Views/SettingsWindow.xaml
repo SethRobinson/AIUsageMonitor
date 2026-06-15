@@ -284,6 +284,18 @@
                                   FontSize="13" />
                     </StackPanel>
 
+                    <StackPanel Margin="0,18,0,0">
+                        <CheckBox x:Name="DiagnosticLoggingCheckBox"
+                                  Content="Diagnostic logging"
+                                  Foreground="#D6DAE1"
+                                  FontSize="13" />
+                        <TextBlock Margin="24,4,0,0"
+                                   Text="Writes detailed OpenAI/Codex refresh and quota info to the log (View Logs) for troubleshooting. Leave off for normal use."
+                                   Foreground="#8B93A1"
+                                   FontSize="12"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
                     <TextBlock x:Name="ValidationTextBlock"
                                Margin="0,16,0,0"
                                TextWrapping="Wrap"

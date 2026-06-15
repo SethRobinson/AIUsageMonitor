@@ -1,13 +1,17 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 
 namespace AIUsageMonitor.Collectors;
 
 internal static class CliQuotaRefreshRunner
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(45);
+    private const int DiagnosticOutputCap = 8000;
 
-    public static Task<CliQuotaRefreshResult> RefreshCodexAsync(CancellationToken cancellationToken)
+    public static Task<CliQuotaRefreshResult> RefreshCodexAsync(
+        CancellationToken cancellationToken,
+        Action<string>? diagnostic = null)
     {
         var workingDirectory = EnsureWorkingDirectory("codex");
         var args = new[]
@@ -57,7 +61,7 @@ internal static class CliQuotaRefreshRunner
             "Reply exactly OK. Do not inspect files or run commands."
         };
 
-        return RunAsync("codex", args, workingDirectory, cancellationToken);
+        return RunAsync("codex", args, workingDirectory, cancellationToken, diagnostic);
     }
 
     public static Task<CliQuotaRefreshResult> RefreshClaudeAsync(CancellationToken cancellationToken)
@@ -84,16 +88,19 @@ internal static class CliQuotaRefreshRunner
         string command,
         IReadOnlyList<string> args,
         string workingDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? diagnostic = null)
     {
         var commandPath = FindCommandPath(command);
         if (string.IsNullOrWhiteSpace(commandPath))
         {
+            diagnostic?.Invoke($"{command} refresh: command not found on PATH.");
             return CliQuotaRefreshResult.Missing($"{command} command was not found on PATH.");
         }
 
         var startInfo = BuildStartInfo(commandPath, args, workingDirectory);
         using var process = new Process { StartInfo = startInfo };
+        var stopwatch = diagnostic is null ? null : Stopwatch.StartNew();
 
         try
         {
@@ -101,6 +108,7 @@ internal static class CliQuotaRefreshRunner
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
+            diagnostic?.Invoke($"{command} refresh: could not start process ({commandPath}): {ex.Message}");
             return CliQuotaRefreshResult.Failed($"Could not start {command}: {ex.Message}");
         }
 
@@ -117,12 +125,28 @@ internal static class CliQuotaRefreshRunner
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             TryKill(process);
+            diagnostic?.Invoke($"{command} refresh: timed out after {CommandTimeout.TotalSeconds:0}s (command: {commandPath}).");
             return CliQuotaRefreshResult.Failed($"{command} quota refresh timed out after {CommandTimeout.TotalSeconds:0} seconds.");
         }
 
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
         var output = SummarizeOutput(stdout, stderr);
+        var exhausted = LooksQuotaExhausted(output);
+
+        if (diagnostic is not null)
+        {
+            stopwatch?.Stop();
+            diagnostic(BuildRunDiagnostic(
+                command,
+                commandPath,
+                args,
+                process.ExitCode,
+                stopwatch?.ElapsedMilliseconds ?? 0,
+                stdout,
+                stderr,
+                exhausted));
+        }
 
         if (process.ExitCode == 0)
         {
@@ -133,7 +157,7 @@ internal static class CliQuotaRefreshRunner
             ? $"{command} quota refresh failed with exit code {process.ExitCode}."
             : $"{command} quota refresh failed with exit code {process.ExitCode}: {output}";
 
-        return LooksQuotaExhausted(output)
+        return exhausted
             ? CliQuotaRefreshResult.Exhausted(message)
             : CliQuotaRefreshResult.Failed(message);
     }
@@ -166,6 +190,11 @@ internal static class CliQuotaRefreshRunner
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // The codex/claude CLIs emit UTF-8. Without this, redirected output is decoded with the
+            // console's OEM code page (932/Shift-JIS on Japanese Windows), turning the output into
+            // mojibake that can make LooksQuotaExhausted misfire. Pin UTF-8 on every locale.
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             CreateNoWindow = true
         };
 
@@ -221,6 +250,33 @@ internal static class CliQuotaRefreshRunner
         }
 
         return text[..500] + "...";
+    }
+
+    private static string BuildRunDiagnostic(
+        string command,
+        string commandPath,
+        IReadOnlyList<string> args,
+        int exitCode,
+        long elapsedMs,
+        string stdout,
+        string stderr,
+        bool looksExhausted)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"{command} refresh ran: exitCode={exitCode}, elapsedMs={elapsedMs}, looksQuotaExhausted={looksExhausted}.");
+        builder.AppendLine($"command: {commandPath}");
+        builder.AppendLine($"args: {string.Join(' ', args)}");
+        builder.AppendLine($"stdout ({stdout.Length} chars): {CapDiagnostic(stdout)}");
+        builder.Append($"stderr ({stderr.Length} chars): {CapDiagnostic(stderr)}");
+        return builder.ToString();
+    }
+
+    private static string CapDiagnostic(string text)
+    {
+        text = text.Trim();
+        return text.Length <= DiagnosticOutputCap
+            ? text
+            : text[..DiagnosticOutputCap] + $"…(+{text.Length - DiagnosticOutputCap} more chars)";
     }
 
     private static bool LooksQuotaExhausted(string output)

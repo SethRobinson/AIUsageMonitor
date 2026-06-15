@@ -26,7 +26,7 @@ public sealed class UsageAggregatorService
         _collectors = collectors ??
         [
             new ClaudeStatusFileUsageCollector(),
-            new CodexLogUsageCollector(),
+            new CodexLogUsageCollector(logService, settingsService),
             new AntigravityUsageCollector(),
             new GeminiUsageCollector(),
             new CursorUsageCollector(settingsService)

@@ -30,6 +30,7 @@ public partial class SettingsWindow : Window
         UpdateCursorModeSummary();
         ClaudeStatusExporterCheckBox.IsChecked = Settings.ClaudeStatusExporterEnabled;
         AutoRunAtLoginCheckBox.IsChecked = Settings.AutoRunAtLoginEnabled || Services.AutoRunService.IsEnabled();
+        DiagnosticLoggingCheckBox.IsChecked = Settings.DiagnosticLoggingEnabled;
         UpdateIntervalTextBox.SelectAll();
         UpdateIntervalTextBox.Focus();
     }
@@ -203,6 +204,7 @@ public partial class SettingsWindow : Window
         Settings.SetProviderEnabled(KnownProviders.Cursor, CursorProviderEnabledCheckBox.IsChecked == true);
         Settings.ClaudeStatusExporterEnabled = ClaudeStatusExporterCheckBox.IsChecked == true;
         Settings.AutoRunAtLoginEnabled = AutoRunAtLoginCheckBox.IsChecked == true;
+        Settings.DiagnosticLoggingEnabled = DiagnosticLoggingCheckBox.IsChecked == true;
         MergeSavedCursorDashboardLogin();
         Settings.Normalize();
     }
