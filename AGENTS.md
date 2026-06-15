@@ -16,6 +16,8 @@
   - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot .\docs\screenshot-compact.png --screenshot-size 1440x136`
   - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot .\docs\screenshot-mini-strip.png --screenshot-size 1440x60`
   - `Copy-Item .\docs\screenshot-full.png .\docs\screenshot.png -Force`
+- The Settings-dialog README screenshot is generated from DEFAULT (fake) `AppSettings` — never the user's real `monitor.settings.json` — and auto-sizes its height so every option shows with no scrollbar. Regenerate it with:
+  - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot-settings .\docs\screenshot-settings.png` (pass `--screenshot-size WxH` to force an explicit size instead of auto-fit).
 - When the user says to bump the version, increment it by 0.01, for example `V1.02` becomes `V1.03`. Update both `Services\AppMetadata.cs` and the README download section's current version and latest updated date.
 - `package-release.bat` publishes a self-contained win-x64 single-file build, signs it, verifies the signature, copies `build\SethsAIUsageMonitor.exe`, and creates `artifacts\SethsAIUsageMonitor-win-x64.zip`.
 - The release must ALWAYS be code-signed. Never add a skip-signing/unsigned path, never distribute an unsigned build, and don't "work around" signing problems by disabling it. Signing is done by `%RT_PROJECTS%\Signing\sign.bat` and is non-interactive (SmartCard token + PIN) as long as the token is plugged in.
