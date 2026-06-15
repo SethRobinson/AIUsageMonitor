@@ -171,7 +171,8 @@ internal static class ScreenshotService
                             Used = window.Used,
                             Remaining = window.Remaining,
                             ResetAt = RebaseTime(window.ResetAt, originalGeneratedAt, generatedAt),
-                            Detail = window.Detail
+                            Detail = window.Detail,
+                            IsInactive = window.IsInactive
                         })
                         .ToList()
                 })

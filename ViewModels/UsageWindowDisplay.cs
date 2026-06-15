@@ -7,8 +7,6 @@ public sealed class UsageWindowDisplay
 {
     public UsageWindowDisplay(UsageWindow usageWindow)
     {
-        var status = UsageStatus.FromRemainingPercent(usageWindow.RemainingPercent);
-
         Title = string.IsNullOrWhiteSpace(usageWindow.Title) ? "Usage" : usageWindow.Title;
         Limit = usageWindow.Limit;
         Used = usageWindow.Used;
@@ -16,6 +14,27 @@ public sealed class UsageWindowDisplay
         UsedPercent = usageWindow.UsedPercent;
         RemainingPercent = usageWindow.RemainingPercent;
         Detail = usageWindow.Detail;
+        IsInactive = usageWindow.IsInactive;
+
+        if (usageWindow.IsInactive)
+        {
+            // No usable quota on this plan: show a calm greyed row instead of an alarming
+            // "0% left / reset passed". The card excludes inactive windows from its status.
+            var muted = UsageStatus.Unavailable;
+            RemainingText = "N/A";
+            LimitText = string.IsNullOrWhiteSpace(usageWindow.Detail) ? "Not on this plan" : usageWindow.Detail;
+            ResetText = string.Empty;
+            ResetRelativeText = string.Empty;
+            ResetRelativeBrush = UsageBrushes.FrozenBrush("#A8AFBA");
+            StatusLabel = muted.Label;
+            StatusBrush = muted.Foreground;
+            StatusBackground = muted.Background;
+            ProgressBrush = UsageBrushes.FrozenBrush("#4B5563");
+            return;
+        }
+
+        var status = UsageStatus.FromRemainingPercent(usageWindow.RemainingPercent);
+
         RemainingText = $"{usageWindow.RemainingPercent:0}% left";
         LimitText = string.IsNullOrWhiteSpace(Detail) ? RemainingText : Detail;
         ResetText = usageWindow.ResetAt is { } resetAt
@@ -34,6 +53,8 @@ public sealed class UsageWindowDisplay
     }
 
     public string Title { get; }
+
+    public bool IsInactive { get; }
 
     public double Limit { get; }
 

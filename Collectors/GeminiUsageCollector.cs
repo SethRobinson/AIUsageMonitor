@@ -273,16 +273,32 @@ public sealed class GeminiUsageCollector : IUsageCollector
             .OrderBy(group => group.Key)
             .ToList();
 
+        var now = DateTimeOffset.UtcNow;
         var windows = new List<UsageWindow>();
         foreach (var group in bucketsByFamily)
         {
-            var lowestBucket = group.OrderBy(bucket => bucket.RemainingFraction).First();
+            var buckets = group.ToList();
+
+            // A family with no remaining quota AND no future reset has no live allocation — this is
+            // what a free Google account returns for "Pro" (an empty bucket whose reset is already in
+            // the past). Mark it inactive rather than letting it read as a real 0% / Exhausted window.
+            // A paid account that has genuinely burned its Pro cap still has a *future* reset, so it
+            // stays a normal exhausted window.
+            var hasRemaining = buckets.Any(bucket => bucket.RemainingFraction > 0);
+            var hasFutureReset = buckets.Any(bucket => bucket.ResetAt is { } reset && reset > now);
+            if (!hasRemaining && !hasFutureReset)
+            {
+                windows.Add(ProviderUsageFactory.InactiveWindow($"Gemini {group.Key}"));
+                continue;
+            }
+
+            var lowestBucket = buckets.OrderBy(bucket => bucket.RemainingFraction).First();
             var remainingPercent = Math.Clamp(lowestBucket.RemainingFraction * 100d, 0, 100);
             windows.Add(ProviderUsageFactory.PercentWindow(
                 $"Gemini {group.Key}",
                 100 - remainingPercent,
                 lowestBucket.ResetAt,
-                $"{remainingPercent:0.#}% left across {group.Count()} model bucket(s)"));
+                $"{remainingPercent:0.#}% left across {buckets.Count} model bucket(s)"));
         }
 
         if (windows.Count == 0)

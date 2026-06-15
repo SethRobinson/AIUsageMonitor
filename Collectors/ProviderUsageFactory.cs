@@ -32,4 +32,18 @@ internal static class ProviderUsageFactory
             Detail = detail
         };
     }
+
+    public static UsageWindow InactiveWindow(string title, string detail = "Not on this plan")
+    {
+        return new UsageWindow
+        {
+            Title = title,
+            Limit = 100,
+            Used = 100,
+            Remaining = 0,
+            ResetAt = null,
+            Detail = detail,
+            IsInactive = true
+        };
+    }
 }

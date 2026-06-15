@@ -16,6 +16,14 @@ public sealed class UsageWindow
 
     public string Detail { get; init; } = string.Empty;
 
+    /// <summary>
+    /// True when this model family has no usable quota on the current account/plan — e.g. a free
+    /// Google tier that still returns an empty, already-reset "Pro" bucket. Inactive windows are
+    /// shown muted as "Not on this plan" and are excluded from the provider card's headline percent
+    /// and overall status, so an unusable model can't drag the whole card to 0% / Exhausted.
+    /// </summary>
+    public bool IsInactive { get; init; }
+
     [JsonIgnore]
     public double EffectiveRemaining => Remaining ?? Math.Max(Limit - Used, 0);
 

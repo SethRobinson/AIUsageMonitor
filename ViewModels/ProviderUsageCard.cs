@@ -21,18 +21,23 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         LastCheckedAt = usage.LastCheckedAt;
         AccentBrush = UsageBrushes.ProviderAccent(usage.Name);
         Windows = usage.Windows.Select(window => new UsageWindowDisplay(window)).ToList();
-        PrimaryRemainingPercent = Windows.Count == 0
-            ? 0
-            : Windows.Min(window => window.RemainingPercent);
 
-        var status = usage.IsUnavailable || Windows.Count == 0
+        // Inactive windows (e.g. a "Pro" model the current plan can't use) are still shown, but they
+        // must not set the card's headline percent or status — otherwise an unusable model reads as
+        // "0% / Exhausted" even when the usable models are full.
+        var activeWindows = Windows.Where(window => !window.IsInactive).ToList();
+        PrimaryRemainingPercent = activeWindows.Count == 0
+            ? 0
+            : activeWindows.Min(window => window.RemainingPercent);
+
+        var status = usage.IsUnavailable || activeWindows.Count == 0
             ? UsageStatus.Unavailable
             : UsageStatus.FromRemainingPercent(PrimaryRemainingPercent);
         OverallStatusLabel = status.Label;
         OverallStatusBrush = status.Foreground;
         OverallStatusBackground = status.Background;
         SummaryProgressBrush = status.Foreground;
-        _summaryText = usage.IsUnavailable || Windows.Count == 0
+        _summaryText = usage.IsUnavailable || activeWindows.Count == 0
             ? $"{ShortName} - {GetUnavailableSummary(usage.StatusMessage)}"
             : $"{ShortName} - {PrimaryRemainingPercent:0}%";
         RefreshCheckedText();
