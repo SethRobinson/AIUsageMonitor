@@ -19,10 +19,23 @@
 - When the user says to bump the version, increment it by 0.01, for example `V1.02` becomes `V1.03`. Update both `Services\AppMetadata.cs` and the README download section's current version and latest updated date.
 - `package-release.bat` publishes a self-contained win-x64 single-file build, signs it, verifies the signature, copies `build\SethsAIUsageMonitor.exe`, and creates `artifacts\SethsAIUsageMonitor-win-x64.zip`.
 - The release must ALWAYS be code-signed. Never add a skip-signing/unsigned path, never distribute an unsigned build, and don't "work around" signing problems by disabling it. Signing is done by `%RT_PROJECTS%\Signing\sign.bat` and is non-interactive (SmartCard token + PIN) as long as the token is plugged in.
-- IMPORTANT — running it headlessly (e.g. from an agent/non-interactive shell): `sign.bat` ends with a `pause`, which waits for a keypress and will hang any run that has no interactive console. Do NOT remove the `pause` and do NOT skip signing. Instead feed stdin from `nul` so the `pause` falls through while signing still completes normally: `cmd /c "package-release.bat" < nul`. Also avoid piping its output through buffering filters (e.g. `Select-Object`) if you want to see live progress.
+- IMPORTANT — running it headlessly (e.g. from an agent/non-interactive shell): `sign.bat` ends with a `pause` that waits for a keypress and will hang any run with no interactive console. Do NOT remove the `pause` and do NOT skip signing. Instead feed empty stdin so the `pause` falls through while signing still completes. Also avoid piping output through buffering filters (e.g. `Select-Object`) if you want live progress.
+  - In a `cmd` or `bash` shell the simple form works: `cmd /c "package-release.bat" < nul`.
+  - From the PowerShell tool that form does NOT work, for two reasons: PowerShell has no `<` stdin-redirection operator, and the agent shell runs with `NoDefaultCurrentDirectoryInExePath` set, so cmd refuses to execute a bare/relative batch name from the current directory — it reports `'package-release.bat' is not recognized` even though the file is right there (read-only `dir package-release.bat` still finds it, which makes it look like a directory problem when it is not). Invoke the batch by ABSOLUTE path via `Start-Process`, feed an empty file as stdin, and run the PowerShell tool with `dangerouslyDisableSandbox: true` (signing needs the real SmartCard token; the batch also does `taskkill`/file writes) and a ~600000 ms timeout:
+
+    ```powershell
+    $bat = 'D:\projects\AI\AIUsageMonitor\package-release.bat'
+    $in  = Join-Path $env:TEMP 'pkgrel_in.txt'; Set-Content -LiteralPath $in -Value '' -NoNewline
+    $o   = Join-Path $env:TEMP 'pkgrel_out.txt'; $e = Join-Path $env:TEMP 'pkgrel_err.txt'
+    $p = Start-Process cmd.exe -ArgumentList '/c',"`"$bat`"" -WorkingDirectory (Split-Path $bat) `
+      -RedirectStandardInput $in -RedirectStandardOutput $o -RedirectStandardError $e -NoNewWindow -Wait -PassThru
+    Get-Content $o; Get-Content $e; "EXIT $($p.ExitCode)"
+    ```
+
+  - Success = exit code 0 plus `Successfully signed`, `Successfully verified` / `Number of errors: 0`, `Created ...-win-x64.zip`, and `Copied ...build\SethsAIUsageMonitor.exe`.
 - Keep this `AGENTS.md` file updated whenever project workflow, architecture, test commands, diagnostics, packaging, signing, or release expectations change.
 - If the user says `commit`, stage only the correct task-related files and use a very brief commit message, one or two lines at most, that names each included feature or fix.
 - After finishing any task in this repository, run `dotnet build`.
-- If `dotnet build` succeeds, run `.\package-release.bat` (from a non-interactive shell, run it as `cmd /c "package-release.bat" < nul` — see the signing note above — so the signer's trailing `pause` cannot hang the run; signing must still happen).
+- If `dotnet build` succeeds, run `package-release.bat` so the release is rebuilt and signed (from the PowerShell tool, use the absolute-path `Start-Process` invocation in the headless-run note above — the `cmd /c "..." < nul` form does not work there; the signer's trailing `pause` must not hang the run, and signing must still happen).
 - In the final response, report whether the release package, signing verification, and copied build executable succeeded.
 - Do not treat the task as complete until the release batch has finished or its failure has been reported.

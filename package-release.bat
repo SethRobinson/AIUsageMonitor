@@ -62,7 +62,11 @@ if not exist "%SIGNTOOL_EXE%" (
   exit /b 1
 )
 
-timeout /t 2 /nobreak >nul
+REM ~2s settle delay so the publish process releases the exe handle before signing.
+REM Use ping, not "timeout": timeout aborts with "ERROR: Input redirection is not
+REM supported" when stdin is redirected, which headless/agent runs do to skip the
+REM pause in sign.bat. ping needs no console and emits no stderr noise.
+ping -n 3 127.0.0.1 >nul 2>&1
 call "%RT_PROJECTS%\Signing\sign.bat" "%PUBLISH_EXE%" "Seth's AI Usage Monitor" "rtsoft.com"
 
 "%SIGNTOOL_EXE%" verify /pa /v "%PUBLISH_EXE%"

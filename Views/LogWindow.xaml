@@ -69,6 +69,19 @@
                       BorderBrush="#343A46"
                       RowBackground="#1D2028"
                       AlternatingRowBackground="#222631">
+                <DataGrid.ColumnHeaderStyle>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Background" Value="#252A33" />
+                        <Setter Property="Foreground" Value="#F9FAFB" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                        <Setter Property="Padding" Value="10,7" />
+                        <Setter Property="HorizontalContentAlignment" Value="Left" />
+                        <Setter Property="VerticalContentAlignment" Value="Center" />
+                        <Setter Property="BorderBrush" Value="#343A46" />
+                        <Setter Property="BorderThickness" Value="0,0,1,1" />
+                        <Setter Property="SeparatorBrush" Value="#343A46" />
+                    </Style>
+                </DataGrid.ColumnHeaderStyle>
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Time"
                                         Width="150"
