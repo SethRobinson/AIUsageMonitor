@@ -49,11 +49,18 @@
       "source": "Fake data",
       "windows": [
       {
-        "title": "Gemini Models",
+        "title": "Gemini Flash",
         "limit": 100,
-        "used": 17,
-        "remaining": 83,
-        "resetAt": "2026-05-23T07:30:00+09:00"
+        "used": 9,
+        "remaining": 91,
+        "resetAt": "2026-05-23T06:30:00+09:00"
+      },
+      {
+        "title": "Gemini Pro",
+        "limit": 100,
+        "used": 22,
+        "remaining": 78,
+        "resetAt": "2026-05-23T06:30:00+09:00"
       }
       ]
     },
