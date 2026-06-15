@@ -71,6 +71,36 @@
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="CardFullOnlyElementStyle" TargetType="{x:Type FrameworkElement}">
+            <Setter Property="Visibility" Value="Visible" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compact">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CardCompactOnlyElementStyle" TargetType="{x:Type FrameworkElement}">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compact">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CardMiniOnlyElementStyle" TargetType="{x:Type FrameworkElement}">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="OverlayChromeStyle" TargetType="{x:Type Border}">
             <Setter Property="Margin" Value="18" />
             <Setter Property="Padding" Value="24" />
@@ -99,12 +129,12 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Style.Triggers>
-                <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compact">
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compact">
                     <Setter Property="Margin" Value="4" />
                     <Setter Property="Padding" Value="8" />
                     <Setter Property="MinHeight" Value="92" />
                 </DataTrigger>
-                <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
                     <Setter Property="Margin" Value="3,2" />
                     <Setter Property="Padding" Value="6,4" />
                     <Setter Property="MinHeight" Value="0" />
@@ -363,48 +393,41 @@
                                TextWrapping="Wrap" />
                 </Border>
 
-                <ScrollViewer x:Name="ProvidersScrollViewer"
-                              Grid.Row="2"
-                              HorizontalScrollBarVisibility="Disabled">
-                    <ScrollViewer.Style>
-                        <Style TargetType="{x:Type ScrollViewer}">
-                            <Setter Property="Visibility" Value="Visible" />
-                            <Setter Property="Margin" Value="0,18,0,0" />
-                            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding HasProviders}" Value="False">
-                                    <Setter Property="Visibility" Value="Collapsed" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compact">
-                                    <Setter Property="Margin" Value="0" />
-                                    <Setter Property="VerticalScrollBarVisibility" Value="Disabled" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
-                                    <Setter Property="Margin" Value="0" />
-                                    <Setter Property="VerticalScrollBarVisibility" Value="Disabled" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </ScrollViewer.Style>
                     <ItemsControl x:Name="ProvidersList"
-                                  Width="{Binding ProvidersListWidth, RelativeSource={RelativeSource AncestorType=Window}}"
-                                  HorizontalAlignment="Left"
+                                  Grid.Row="2"
                                   ItemsSource="{Binding Providers}"
                                   SizeChanged="ProvidersListOnSizeChanged">
+                        <ItemsControl.Style>
+                            <Style TargetType="{x:Type ItemsControl}">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Setter Property="Margin" Value="0,18,0,0" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasProviders}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compact">
+                                        <Setter Property="Margin" Value="0,0,158,0" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
+                                        <Setter Property="Margin" Value="0" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ItemsControl.Style>
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <WrapPanel IsItemsHost="True"
-                                           ItemWidth="{Binding CardSlotWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                <UniformGrid IsItemsHost="True"
+                                             Columns="{Binding CardColumns, RelativeSource={RelativeSource AncestorType=Window}}" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Style="{StaticResource ProviderCardStyle}">
                                     <Grid>
-                                        <Grid Style="{StaticResource FullOnlyElementStyle}">
+                                        <Grid Style="{StaticResource CardFullOnlyElementStyle}">
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
                                             </Grid.RowDefinitions>
 
                                             <Grid Grid.Row="0">
@@ -445,18 +468,25 @@
                                                 </StackPanel>
                                             </Grid>
 
-                                            <StackPanel Grid.Row="1"
-                                                        Margin="0,18,0,0">
+                                            <Grid Grid.Row="1"
+                                                  Margin="0,16,0,0">
                                                 <TextBlock Text="{Binding StatusMessage}"
                                                            Foreground="#A8AFBA"
                                                            FontSize="13"
                                                            TextWrapping="Wrap"
+                                                           VerticalAlignment="Center"
                                                            Visibility="{Binding IsUnavailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                                                 <ItemsControl ItemsSource="{Binding Windows}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <UniformGrid Columns="1" />
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <StackPanel Margin="0,0,0,18">
+                                                            <StackPanel VerticalAlignment="Center"
+                                                                        Margin="0,6">
                                                                 <Grid>
                                                                     <Grid.ColumnDefinitions>
                                                                         <ColumnDefinition Width="*" />
@@ -464,21 +494,22 @@
                                                                     </Grid.ColumnDefinitions>
                                                                     <TextBlock Text="{Binding Title}"
                                                                                Foreground="#D6DAE1"
-                                                                               FontSize="13"
+                                                                               FontSize="14"
                                                                                FontWeight="SemiBold" />
                                                                     <TextBlock Grid.Column="1"
                                                                                Text="{Binding RemainingText}"
                                                                                Foreground="#F9FAFB"
-                                                                               FontSize="13"
+                                                                               FontSize="14"
                                                                                FontWeight="SemiBold" />
                                                                 </Grid>
 
-                                                                <ProgressBar Margin="0,8,0,0"
+                                                                <ProgressBar Margin="0,9,0,0"
+                                                                             Height="10"
                                                                              Style="{StaticResource UsageProgressBarStyle}"
                                                                              Value="{Binding RemainingPercent, Mode=OneWay}"
                                                                              Foreground="{Binding ProgressBrush}" />
 
-                                                                <Grid Margin="0,8,0,0">
+                                                                <Grid Margin="0,9,0,0">
                                                                     <Grid.ColumnDefinitions>
                                                                         <ColumnDefinition Width="*" />
                                                                         <ColumnDefinition Width="Auto" />
@@ -505,10 +536,14 @@
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
-                                            </StackPanel>
+                                            </Grid>
                                         </Grid>
 
-                                        <StackPanel Style="{StaticResource CompactOnlyElementStyle}">
+                                        <Grid Style="{StaticResource CardCompactOnlyElementStyle}">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
@@ -532,11 +567,18 @@
                                                 </Border>
                                             </Grid>
 
-                                            <ItemsControl Margin="0,8,0,0"
+                                            <ItemsControl Grid.Row="1"
+                                                          Margin="0,8,0,0"
                                                           ItemsSource="{Binding Windows}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <UniformGrid Columns="1" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Grid Margin="0,5,0,0">
+                                                        <Grid VerticalAlignment="Center"
+                                                              Margin="0,3">
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="Auto" />
                                                                 <ColumnDefinition Width="*" />
@@ -548,7 +590,8 @@
                                                                        FontSize="11"
                                                                        MaxWidth="130"
                                                                        MinWidth="58"
-                                                                       TextTrimming="CharacterEllipsis" />
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       VerticalAlignment="Center" />
                                                             <ProgressBar Grid.Column="1"
                                                                          Margin="8,0,8,0"
                                                                          Height="6"
@@ -561,20 +604,23 @@
                                                                        Text="{Binding ResetRelativeText}"
                                                                        Foreground="{Binding ResetRelativeBrush}"
                                                                        FontSize="11"
-                                                                       FontWeight="SemiBold" />
+                                                                       FontWeight="SemiBold"
+                                                                       VerticalAlignment="Center" />
                                                             <TextBlock Grid.Column="3"
                                                                        Margin="8,0,0,0"
                                                                        Text="{Binding RemainingText}"
                                                                        Foreground="#D6DAE1"
                                                                        FontSize="11"
-                                                                       FontWeight="SemiBold" />
+                                                                       FontWeight="SemiBold"
+                                                                       VerticalAlignment="Center" />
                                                         </Grid>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
-                                        </StackPanel>
+                                        </Grid>
 
-                                        <StackPanel Style="{StaticResource MiniOnlyElementStyle}">
+                                        <StackPanel Style="{StaticResource CardMiniOnlyElementStyle}"
+                                                    VerticalAlignment="Center">
                                             <TextBlock Text="{Binding SummaryText}"
                                                        Foreground="#F3F4F6"
                                                        FontSize="12"
@@ -591,7 +637,6 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </ScrollViewer>
 
                 <Border Grid.Row="2"
                         Background="#1D2028"
