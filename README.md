@@ -8,6 +8,10 @@ The overlay changes content density as you resize it instead of simply shrinking
 
 ![Tiny strip overlay](docs/screenshot-mini-strip.png)
 
+Settings let you pick the refresh interval, UI scale, which providers appear, whether the overlay stays always-on-top, and more:
+
+![Settings dialog](docs/screenshot-settings.png)
+
 # Download #
 
 Current version: V1.03, latest updated June 14, 2026.

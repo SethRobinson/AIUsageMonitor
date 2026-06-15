@@ -47,9 +47,15 @@
       "name": "Antigravity",
       "planName": "Google AI Pro",
       "source": "Fake data",
-      "statusMessage": "Checking usage data...",
-      "isUnavailable": true,
-      "windows": []
+      "windows": [
+      {
+        "title": "Gemini Models",
+        "limit": 100,
+        "used": 17,
+        "remaining": 83,
+        "resetAt": "2026-05-23T07:30:00+09:00"
+      }
+      ]
     },
     {
       "name": "Gemini",

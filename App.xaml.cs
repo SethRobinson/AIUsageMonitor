@@ -18,6 +18,22 @@ public partial class App : System.Windows.Application
         _logService = new AppLogService();
         RegisterGlobalExceptionHandlers();
 
+        if (TryGetSettingsScreenshotOptions(e.Args, out var settingsScreenshotPath, out var settingsScreenshotWidth, out var settingsScreenshotHeight))
+        {
+            try
+            {
+                ScreenshotService.SaveSettingsScreenshot(settingsScreenshotPath, settingsScreenshotWidth, settingsScreenshotHeight);
+                Shutdown();
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Could not save settings screenshot: {exception.Message}");
+                Shutdown(1);
+            }
+
+            return;
+        }
+
         if (TryGetScreenshotOptions(e.Args, out var screenshotPath, out var screenshotWidth, out var screenshotHeight))
         {
             try
@@ -138,6 +154,33 @@ public partial class App : System.Windows.Application
                 double.TryParse(args[index + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedHeightOnly))
             {
                 height = parsedHeightOnly;
+                index++;
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(path);
+    }
+
+    private static bool TryGetSettingsScreenshotOptions(string[] args, out string path, out double? width, out double? height)
+    {
+        path = string.Empty;
+        width = null;
+        height = null;
+
+        for (var index = 0; index < args.Length - 1; index++)
+        {
+            if (string.Equals(args[index], "--screenshot-settings", StringComparison.OrdinalIgnoreCase))
+            {
+                path = args[index + 1];
+                index++;
+                continue;
+            }
+
+            if (string.Equals(args[index], "--screenshot-size", StringComparison.OrdinalIgnoreCase) &&
+                TryParseScreenshotSize(args[index + 1], out var parsedWidth, out var parsedHeight))
+            {
+                width = parsedWidth;
+                height = parsedHeight;
                 index++;
             }
         }
