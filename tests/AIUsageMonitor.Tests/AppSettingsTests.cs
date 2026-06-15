@@ -87,4 +87,25 @@ public sealed class AppSettingsTests
 
         Assert.IsTrue(clone.DiagnosticLoggingEnabled);
     }
+
+    [TestMethod]
+    public void AlwaysOnTopDefaultsToTrue()
+    {
+        var settings = new AppSettings();
+
+        Assert.IsTrue(settings.AlwaysOnTop);
+    }
+
+    [TestMethod]
+    public void CloneCopiesAlwaysOnTop()
+    {
+        var settings = new AppSettings
+        {
+            AlwaysOnTop = false
+        };
+
+        var clone = settings.Clone();
+
+        Assert.IsFalse(clone.AlwaysOnTop);
+    }
 }

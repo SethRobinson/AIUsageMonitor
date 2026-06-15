@@ -29,7 +29,7 @@
             <ScrollViewer Grid.Row="1"
                           Margin="0,22,0,16"
                           VerticalScrollBarVisibility="Auto">
-                <StackPanel>
+                <StackPanel Margin="0,0,8,0">
                     <StackPanel>
                         <TextBlock Text="Update interval"
                                    FontSize="13"
@@ -107,10 +107,7 @@
                                 BorderBrush="#303641"
                                 BorderThickness="1"
                                 CornerRadius="8">
-                            <ScrollViewer MaxHeight="380"
-                                          VerticalScrollBarVisibility="Auto"
-                                          HorizontalScrollBarVisibility="Disabled">
-                                <StackPanel>
+                            <StackPanel>
                                     <Border Padding="12"
                                             BorderBrush="#2A303A"
                                             BorderThickness="0,0,0,1">
@@ -272,9 +269,20 @@
                                                     Click="CursorSetupButtonOnClick" />
                                         </Grid>
                                     </Border>
-                                </StackPanel>
-                            </ScrollViewer>
+                            </StackPanel>
                         </Border>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,22,0,0">
+                        <CheckBox x:Name="AlwaysOnTopCheckBox"
+                                  Content="Always on top"
+                                  Foreground="#D6DAE1"
+                                  FontSize="13" />
+                        <TextBlock Margin="24,4,0,0"
+                                   Text="Keeps the overlay window above other windows. Turn off to let it behave like a normal window."
+                                   Foreground="#8B93A1"
+                                   FontSize="12"
+                                   TextWrapping="Wrap" />
                     </StackPanel>
 
                     <StackPanel Margin="0,22,0,0">

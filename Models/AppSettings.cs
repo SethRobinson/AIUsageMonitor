@@ -35,6 +35,8 @@ public sealed class AppSettings
 
     public bool DiagnosticLoggingEnabled { get; set; }
 
+    public bool AlwaysOnTop { get; set; } = true;
+
     public OverlayWindowPlacement OverlayWindowPlacement { get; set; } = new();
 
     public AppSettings Clone()
@@ -52,6 +54,7 @@ public sealed class AppSettings
             ClaudeStatusExporterEnabled = ClaudeStatusExporterEnabled,
             AutoRunAtLoginEnabled = AutoRunAtLoginEnabled,
             DiagnosticLoggingEnabled = DiagnosticLoggingEnabled,
+            AlwaysOnTop = AlwaysOnTop,
             OverlayWindowPlacement = OverlayWindowPlacement?.Clone() ?? new OverlayWindowPlacement()
         };
     }

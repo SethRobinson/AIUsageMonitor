@@ -119,7 +119,7 @@ public sealed class TrayIconService : IDisposable
 
     private void ToggleOverlay()
     {
-        if (_overlayWindow?.IsVisible == true)
+        if (_overlayWindow?.IsVisible == true && _overlayWindow.WindowState != WindowState.Minimized)
         {
             SaveOverlayWindowPlacement();
             _overlayWindow.Hide();
@@ -146,6 +146,11 @@ public sealed class TrayIconService : IDisposable
             _overlayWindow!.EnsureValidPlacement();
         }
 
+        if (_overlayWindow!.WindowState == WindowState.Minimized)
+        {
+            _overlayWindow.WindowState = WindowState.Normal;
+        }
+
         _overlayWindow!.Show();
         _overlayWindow.Activate();
         _overlayWindow.Focus();
@@ -164,6 +169,7 @@ public sealed class TrayIconService : IDisposable
             DataContext = _viewModel
         };
         _overlayWindow.ApplyUiScalePercent(_settings.UiScalePercent);
+        _overlayWindow.ApplyAlwaysOnTop(_settings.AlwaysOnTop);
         _overlayWindow.ApplyStartupPlacement(_settings.OverlayWindowPlacement);
         _overlayWindow.ReloadRequested += (_, _) => _ = ManualRefreshAsync();
         _overlayWindow.SettingsRequested += (_, _) => ShowSettings();
@@ -249,6 +255,11 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
+        if (window.WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
         try
         {
             _settings.OverlayWindowPlacement = window.GetCurrentPlacement();
@@ -314,6 +325,9 @@ public sealed class TrayIconService : IDisposable
         BeginOverlayScalePreview();
         settingsWindow.UiScalePreviewChanged += SettingsWindowOnUiScalePreviewChanged;
 
+        // Drop always-on-top while Settings is open so provider setup pages/browsers aren't hidden behind the overlay.
+        _overlayWindow?.ApplyAlwaysOnTop(false);
+
         try
         {
             saved = settingsWindow.ShowDialog() == true;
@@ -327,6 +341,9 @@ public sealed class TrayIconService : IDisposable
                 RestoreOverlayScalePreview(originalUiScalePercent, originalOverlayPlacement);
                 EndOverlayScalePreview();
             }
+
+            // Restore always-on-top to the current setting (still the original here; the saved path re-applies any change).
+            _overlayWindow?.ApplyAlwaysOnTop(_settings.AlwaysOnTop);
         }
 
         if (!saved)
@@ -336,6 +353,7 @@ public sealed class TrayIconService : IDisposable
 
         _settings = settingsWindow.Settings;
         _overlayWindow?.ApplyUiScalePercent(_settings.UiScalePercent);
+        _overlayWindow?.ApplyAlwaysOnTop(_settings.AlwaysOnTop);
         if (_overlayWindow is not null)
         {
             _settings.OverlayWindowPlacement = _overlayWindow.GetCurrentPlacement();

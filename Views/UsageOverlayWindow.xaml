@@ -351,6 +351,10 @@
                                 Style="{StaticResource IconButtonStyle}"
                                 ToolTip="Logs"
                                 Click="LogsButtonOnClick" />
+                        <Button Content="—"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTip="Minimize"
+                                Click="MinimizeButtonOnClick" />
                         <Button Content="×"
                                 Style="{StaticResource IconButtonStyle}"
                                 ToolTip="Hide"
@@ -692,6 +696,10 @@
                             Style="{StaticResource IconButtonStyle}"
                             ToolTip="Logs"
                             Click="LogsButtonOnClick" />
+                    <Button Content="—"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTip="Minimize"
+                            Click="MinimizeButtonOnClick" />
                     <Button Content="×"
                             Style="{StaticResource IconButtonStyle}"
                             ToolTip="Hide"

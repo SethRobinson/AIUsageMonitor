@@ -117,6 +117,7 @@ public partial class UsageOverlayWindow : Window
         Loaded += WindowOnLoaded;
         IsVisibleChanged += WindowOnIsVisibleChanged;
         SizeChanged += WindowOnSizeChanged;
+        StateChanged += WindowOnStateChanged;
         DataContextChanged += WindowOnDataContextChanged;
     }
 
@@ -259,6 +260,21 @@ public partial class UsageOverlayWindow : Window
         UiScale = scale;
     }
 
+    public void ApplyAlwaysOnTop(bool alwaysOnTop)
+    {
+        Topmost = alwaysOnTop;
+        if (alwaysOnTop)
+        {
+            EnsureTopmost();
+        }
+    }
+
+    private void MinimizeButtonOnClick(object sender, RoutedEventArgs e)
+    {
+        ShowInTaskbar = true;
+        WindowState = WindowState.Minimized;
+    }
+
     private void HideButtonOnClick(object sender, RoutedEventArgs e)
     {
         Hide();
@@ -375,6 +391,18 @@ public partial class UsageOverlayWindow : Window
         {
             Dispatcher.BeginInvoke(new Action(EnsureTopmost), DispatcherPriority.Loaded);
         }
+    }
+
+    private void WindowOnStateChanged(object? sender, EventArgs e)
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            ShowInTaskbar = true;
+            return;
+        }
+
+        ShowInTaskbar = false;
+        EnsureTopmost();
     }
 
     private void WindowOnSizeChanged(object sender, SizeChangedEventArgs e)

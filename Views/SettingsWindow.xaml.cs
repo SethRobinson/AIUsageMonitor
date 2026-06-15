@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 using AIUsageMonitor.Models;
 using AIUsageMonitor.Services;
 using WpfButton = System.Windows.Controls.Button;
@@ -31,6 +33,7 @@ public partial class SettingsWindow : Window
         ClaudeStatusExporterCheckBox.IsChecked = Settings.ClaudeStatusExporterEnabled;
         AutoRunAtLoginCheckBox.IsChecked = Settings.AutoRunAtLoginEnabled || Services.AutoRunService.IsEnabled();
         DiagnosticLoggingCheckBox.IsChecked = Settings.DiagnosticLoggingEnabled;
+        AlwaysOnTopCheckBox.IsChecked = Settings.AlwaysOnTop;
         UpdateIntervalTextBox.SelectAll();
         UpdateIntervalTextBox.Focus();
     }
@@ -205,6 +208,7 @@ public partial class SettingsWindow : Window
         Settings.ClaudeStatusExporterEnabled = ClaudeStatusExporterCheckBox.IsChecked == true;
         Settings.AutoRunAtLoginEnabled = AutoRunAtLoginCheckBox.IsChecked == true;
         Settings.DiagnosticLoggingEnabled = DiagnosticLoggingCheckBox.IsChecked == true;
+        Settings.AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true;
         MergeSavedCursorDashboardLogin();
         Settings.Normalize();
     }
@@ -271,6 +275,34 @@ public partial class SettingsWindow : Window
         Settings.CursorDashboardCookieHeaderProtected = savedSettings.CursorDashboardCookieHeaderProtected;
         Settings.CursorDashboardCookiesCapturedAt = savedSettings.CursorDashboardCookiesCapturedAt;
     }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        RemoveMinimizeMaximizeButtons();
+    }
+
+    private void RemoveMinimizeMaximizeButtons()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var style = GetWindowLong(handle, GwlStyle);
+        SetWindowLong(handle, GwlStyle, style & ~WsMaximizeBox & ~WsMinimizeBox);
+    }
+
+    private const int GwlStyle = -16;
+    private const int WsMinimizeBox = 0x00020000;
+    private const int WsMaximizeBox = 0x00010000;
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
     private sealed record ProviderSetupInfo(
         string Title,
