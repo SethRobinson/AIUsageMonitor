@@ -27,6 +27,9 @@ public partial class UsageOverlayWindow : Window
     private const double CardFullMinCellHeight = 250;
     private const double CardCompactMinCellWidth = 210;
     private const double CardCompactMinCellHeight = 90;
+    private const double MaxCardScale = 1.5;
+    private const double CardScaleBaseWidth = 300;
+    private const double CardScaleBaseHeight = 250;
     private const double FullEmptyMinimumHeight = 240;
     private const double CompactEmptyMinimumHeight = 96;
     private const double MiniEmptyMinimumHeight = 58;
@@ -86,6 +89,12 @@ public partial class UsageOverlayWindow : Window
         typeof(string),
         typeof(UsageOverlayWindow),
         new PropertyMetadata(FullDisplayMode));
+
+    public static readonly DependencyProperty CardContentScaleProperty = DependencyProperty.Register(
+        nameof(CardContentScale),
+        typeof(double),
+        typeof(UsageOverlayWindow),
+        new PropertyMetadata(1d));
 
     private double _resizeStartHeight;
     private double _resizeStartWidth;
@@ -228,6 +237,12 @@ public partial class UsageOverlayWindow : Window
     {
         get => (string)GetValue(CardDetailLevelProperty);
         private set => SetValue(CardDetailLevelProperty, value);
+    }
+
+    public double CardContentScale
+    {
+        get => (double)GetValue(CardContentScaleProperty);
+        private set => SetValue(CardContentScaleProperty, value);
     }
 
     public void ApplyUiScalePercent(int scalePercent)
@@ -449,6 +464,17 @@ public partial class UsageOverlayWindow : Window
         if (!string.Equals(CardDetailLevel, detailLevel, StringComparison.Ordinal))
         {
             CardDetailLevel = detailLevel;
+        }
+
+        // Grow the card content as the cell gets bigger so large tiles read like a full dashboard
+        // panel. Width-limited (Min) so the scaled-up bars/text never overflow the card.
+        var contentScale = Math.Clamp(
+            Math.Min(cellWidth / CardScaleBaseWidth, cellHeight / CardScaleBaseHeight),
+            1d,
+            MaxCardScale);
+        if (Math.Abs(CardContentScale - contentScale) > 0.001)
+        {
+            CardContentScale = contentScale;
         }
 
         // Small floor so the window can be dragged down to a single Mini card in any direction.

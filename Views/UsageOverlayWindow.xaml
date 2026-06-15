@@ -424,13 +424,13 @@
                             <DataTemplate>
                                 <Border Style="{StaticResource ProviderCardStyle}">
                                     <Grid>
-                                        <Grid Style="{StaticResource CardFullOnlyElementStyle}">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="*" />
-                                            </Grid.RowDefinitions>
-
-                                            <Grid Grid.Row="0">
+                                        <Grid.LayoutTransform>
+                                            <ScaleTransform ScaleX="{Binding CardContentScale, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            ScaleY="{Binding CardContentScale, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                        </Grid.LayoutTransform>
+                                        <StackPanel Style="{StaticResource CardFullOnlyElementStyle}"
+                                                    VerticalAlignment="Center">
+                                            <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
@@ -468,82 +468,71 @@
                                                 </StackPanel>
                                             </Grid>
 
-                                            <Grid Grid.Row="1"
-                                                  Margin="0,16,0,0">
-                                                <TextBlock Text="{Binding StatusMessage}"
-                                                           Foreground="#A8AFBA"
-                                                           FontSize="13"
-                                                           TextWrapping="Wrap"
-                                                           VerticalAlignment="Center"
-                                                           Visibility="{Binding IsUnavailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            <TextBlock Text="{Binding StatusMessage}"
+                                                       Margin="0,16,0,0"
+                                                       Foreground="#A8AFBA"
+                                                       FontSize="13"
+                                                       TextWrapping="Wrap"
+                                                       Visibility="{Binding IsUnavailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
-                                                <ItemsControl ItemsSource="{Binding Windows}">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate>
-                                                            <UniformGrid Columns="1" />
-                                                        </ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <StackPanel VerticalAlignment="Center"
-                                                                        Margin="0,6">
-                                                                <Grid>
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                    </Grid.ColumnDefinitions>
-                                                                    <TextBlock Text="{Binding Title}"
-                                                                               Foreground="#D6DAE1"
-                                                                               FontSize="14"
-                                                                               FontWeight="SemiBold" />
-                                                                    <TextBlock Grid.Column="1"
-                                                                               Text="{Binding RemainingText}"
-                                                                               Foreground="#F9FAFB"
-                                                                               FontSize="14"
-                                                                               FontWeight="SemiBold" />
-                                                                </Grid>
+                                            <ItemsControl Margin="0,16,0,0"
+                                                          ItemsSource="{Binding Windows}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,0,0,18">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding Title}"
+                                                                           Foreground="#D6DAE1"
+                                                                           FontSize="14"
+                                                                           FontWeight="SemiBold" />
+                                                                <TextBlock Grid.Column="1"
+                                                                           Text="{Binding RemainingText}"
+                                                                           Foreground="#F9FAFB"
+                                                                           FontSize="14"
+                                                                           FontWeight="SemiBold" />
+                                                            </Grid>
 
-                                                                <ProgressBar Margin="0,9,0,0"
-                                                                             Height="10"
-                                                                             Style="{StaticResource UsageProgressBarStyle}"
-                                                                             Value="{Binding RemainingPercent, Mode=OneWay}"
-                                                                             Foreground="{Binding ProgressBrush}" />
+                                                            <ProgressBar Margin="0,9,0,0"
+                                                                         Height="12"
+                                                                         Style="{StaticResource UsageProgressBarStyle}"
+                                                                         Value="{Binding RemainingPercent, Mode=OneWay}"
+                                                                         Foreground="{Binding ProgressBrush}" />
 
-                                                                <Grid Margin="0,9,0,0">
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                    </Grid.ColumnDefinitions>
-                                                                    <TextBlock Text="{Binding LimitText}"
-                                                                               Margin="0,0,12,0"
-                                                                               Foreground="#A8AFBA"
+                                                            <Grid Margin="0,9,0,0">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding LimitText}"
+                                                                           Margin="0,0,12,0"
+                                                                           Foreground="#A8AFBA"
+                                                                           FontSize="12"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                                <StackPanel Grid.Column="1"
+                                                                            Orientation="Horizontal"
+                                                                            HorizontalAlignment="Right">
+                                                                    <TextBlock Text="{Binding ResetRelativeText}"
+                                                                               Foreground="{Binding ResetRelativeBrush}"
                                                                                FontSize="12"
-                                                                               TextTrimming="CharacterEllipsis" />
-                                                                    <StackPanel Grid.Column="1"
-                                                                                Orientation="Horizontal"
-                                                                                HorizontalAlignment="Right">
-                                                                        <TextBlock Text="{Binding ResetRelativeText}"
-                                                                                   Foreground="{Binding ResetRelativeBrush}"
-                                                                                   FontSize="12"
-                                                                                   FontWeight="SemiBold" />
-                                                                        <TextBlock Text="{Binding ResetText}"
-                                                                                   Margin="10,0,0,0"
-                                                                                   Foreground="#A8AFBA"
-                                                                                   FontSize="12" />
-                                                                    </StackPanel>
-                                                                </Grid>
-                                                            </StackPanel>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </Grid>
-                                        </Grid>
+                                                                               FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding ResetText}"
+                                                                               Margin="10,0,0,0"
+                                                                               Foreground="#A8AFBA"
+                                                                               FontSize="12" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
 
-                                        <Grid Style="{StaticResource CardCompactOnlyElementStyle}">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="*" />
-                                            </Grid.RowDefinitions>
+                                        <StackPanel Style="{StaticResource CardCompactOnlyElementStyle}"
+                                                    VerticalAlignment="Center">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
@@ -567,18 +556,11 @@
                                                 </Border>
                                             </Grid>
 
-                                            <ItemsControl Grid.Row="1"
-                                                          Margin="0,8,0,0"
+                                            <ItemsControl Margin="0,8,0,0"
                                                           ItemsSource="{Binding Windows}">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <UniformGrid Columns="1" />
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Grid VerticalAlignment="Center"
-                                                              Margin="0,3">
+                                                        <Grid Margin="0,5,0,0">
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="Auto" />
                                                                 <ColumnDefinition Width="*" />
@@ -617,7 +599,7 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
-                                        </Grid>
+                                        </StackPanel>
 
                                         <StackPanel Style="{StaticResource CardMiniOnlyElementStyle}"
                                                     VerticalAlignment="Center">
