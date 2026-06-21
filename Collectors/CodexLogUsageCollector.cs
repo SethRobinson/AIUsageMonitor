@@ -412,7 +412,7 @@ public sealed class CodexLogUsageCollector : IUsageCollector
     {
         try
         {
-            _logService?.Error("Codex Diagnostics", message);
+            _logService?.Info("Codex Diagnostics", message);
         }
         catch (Exception)
         {

@@ -16,20 +16,31 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
     private static readonly TimeSpan CommandSuccessCooldown = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan CommandFailureBackoff = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan CommandUnavailableBackoff = TimeSpan.FromHours(1);
+    private static readonly TimeSpan OAuthRateLimitBackoff = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan UnknownExhaustionBackoff = TimeSpan.FromMinutes(30);
     private DateTimeOffset _nextCommandRefreshAt = DateTimeOffset.MinValue;
     private string _commandRefreshPauseMessage = string.Empty;
+    private DateTimeOffset _nextOAuthUsageAt = DateTimeOffset.MinValue;
+    private string _oauthUsagePauseMessage = string.Empty;
 
-    private static readonly HttpClient HttpClient = new()
+    private static readonly HttpClient SharedHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(20)
     };
+    private readonly string? _homeDirectory;
+    private readonly HttpClient _httpClient;
+
+    public ClaudeStatusFileUsageCollector(string? homeDirectory = null, HttpClient? httpClient = null)
+    {
+        _homeDirectory = homeDirectory;
+        _httpClient = httpClient ?? SharedHttpClient;
+    }
 
     public string ProviderName => KnownProviders.Anthropic;
 
     public async Task<ProviderUsage> CollectAsync(CancellationToken cancellationToken)
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var home = _homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var claudeDirectory = Path.Combine(home, ".claude");
         var credentialsPath = Path.Combine(claudeDirectory, ".credentials.json");
         var account = TryReadClaudeAccount(credentialsPath);
@@ -44,21 +55,38 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
         var localUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
 
-        var oauthUsage = await TryCollectOAuthUsageAsync(claudeDirectory, account, cancellationToken);
-        if (oauthUsage is not null && !oauthUsage.IsUnavailable)
-        {
-            return oauthUsage;
-        }
-
         if (localUsage.FreshUsage is not null)
         {
             return localUsage.FreshUsage;
         }
 
-        var refreshNote = string.Empty;
+        var statusNotes = new List<string>();
         var now = DateTimeOffset.Now;
+        var oauthPaused = _nextOAuthUsageAt > now;
+        var oauthUsage = OAuthUsageReadResult.None;
 
-        if (_nextCommandRefreshAt <= now)
+        if (oauthPaused)
+        {
+            AddStatusNote(statusNotes, $"{_oauthUsagePauseMessage} Next live usage retry after {_nextOAuthUsageAt.ToLocalTime():h:mm tt}.");
+        }
+        else
+        {
+            oauthUsage = await TryCollectOAuthUsageAsync(claudeDirectory, account, cancellationToken);
+            if (oauthUsage.Usage is not null && !oauthUsage.Usage.IsUnavailable)
+            {
+                return oauthUsage.Usage;
+            }
+
+            if (oauthUsage.IsRateLimited)
+            {
+                var retryAt = now.Add(OAuthRateLimitBackoff);
+                var rateLimitMessage = oauthUsage.Usage?.StatusMessage ?? "Claude live usage endpoint is temporarily rate-limited.";
+                PauseOAuthUsage(retryAt, rateLimitMessage);
+                AddStatusNote(statusNotes, $"{rateLimitMessage} Next live usage retry after {retryAt.ToLocalTime():h:mm tt}.");
+            }
+        }
+
+        if (_nextCommandRefreshAt <= now && !oauthPaused && !oauthUsage.IsRateLimited)
         {
             var refreshResult = await CliQuotaRefreshRunner.RefreshClaudeAsync(cancellationToken);
             var refreshedLocalUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
@@ -74,7 +102,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
                     return WithStatusNote(refreshedLocalUsage.FreshUsage, "Refreshed by Claude command.");
                 }
 
-                refreshNote = "Claude refresh command ran, but no fresh status export was written.";
+                AddStatusNote(statusNotes, "Claude refresh command ran, but no fresh status export was written.");
                 localUsage = refreshedLocalUsage;
             }
             else
@@ -84,22 +112,18 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
                     : now.Add(refreshResult.CommandFound ? CommandFailureBackoff : CommandUnavailableBackoff);
 
                 PauseCommandRefresh(retryAt, refreshResult.Message);
-                refreshNote = $"{refreshResult.Message} Next command retry after {retryAt.ToLocalTime():h:mm tt}.";
+                AddStatusNote(statusNotes, $"{refreshResult.Message} Next command retry after {retryAt.ToLocalTime():h:mm tt}.");
             }
         }
         else if (!string.IsNullOrWhiteSpace(_commandRefreshPauseMessage))
         {
-            refreshNote = $"{_commandRefreshPauseMessage} Next command retry after {_nextCommandRefreshAt.ToLocalTime():h:mm tt}.";
-        }
-
-        if (oauthUsage is not null)
-        {
-            return WithStatusNote(oauthUsage, refreshNote);
+            AddStatusNote(statusNotes, $"{_commandRefreshPauseMessage} Next command retry after {_nextCommandRefreshAt.ToLocalTime():h:mm tt}.");
         }
 
         if (localUsage.StaleExport is not null)
         {
             var staleMessage = $"Claude status export is stale; last update was {FormatRelativeAge(localUsage.StaleExport.UpdatedAt)}. Start Claude Code and send one prompt, or wait for OAuth usage collection to recover.";
+            var refreshNote = string.Join(" ", statusNotes);
             if (!string.IsNullOrWhiteSpace(refreshNote))
             {
                 staleMessage += " " + refreshNote;
@@ -112,14 +136,20 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
                 planName);
         }
 
+        if (oauthUsage.Usage is not null)
+        {
+            return WithStatusNote(oauthUsage.Usage, string.Join(" ", statusNotes));
+        }
+
         var exporterPath = Path.Combine(claudeDirectory, ExporterScriptName);
         var message = File.Exists(exporterPath)
             ? "Claude status exporter is installed, but no usage export exists yet. Start Claude Code interactively and send one prompt so the status line receives rate_limits."
             : $"No Claude quota status file found. Configure Claude Code status-line/proxy output to write ~/.claude/{ExportName}.";
 
-        if (!string.IsNullOrWhiteSpace(refreshNote))
+        var finalRefreshNote = string.Join(" ", statusNotes);
+        if (!string.IsNullOrWhiteSpace(finalRefreshNote))
         {
-            message += " " + refreshNote;
+            message += " " + finalRefreshNote;
         }
 
         return ProviderUsageFactory.Unavailable(
@@ -261,7 +291,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         return $"{Math.Max(1, (int)Math.Round(elapsed.TotalDays))} days ago";
     }
 
-    private static async Task<ProviderUsage?> TryCollectOAuthUsageAsync(
+    private async Task<OAuthUsageReadResult> TryCollectOAuthUsageAsync(
         string claudeDirectory,
         ClaudeAccount? account,
         CancellationToken cancellationToken)
@@ -269,14 +299,14 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         var credentialsPath = Path.Combine(claudeDirectory, ".credentials.json");
         if (!File.Exists(credentialsPath))
         {
-            return null;
+            return OAuthUsageReadResult.None;
         }
 
         account ??= TryReadClaudeAccount(credentialsPath);
         var accessToken = account?.AccessToken;
         if (string.IsNullOrWhiteSpace(accessToken))
         {
-            return null;
+            return OAuthUsageReadResult.None;
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com/api/oauth/usage");
@@ -286,62 +316,86 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         HttpResponseMessage response;
         try
         {
-            response = await HttpClient.SendAsync(request, cancellationToken);
+            response = await _httpClient.SendAsync(request, cancellationToken);
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return ProviderUsageFactory.Unavailable(
+            return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
                 "Anthropic",
                 "Claude OAuth usage endpoint timed out. Local status-line export will be used if it is fresh.",
                 credentialsPath,
-                account?.PlanName ?? string.Empty);
+                account?.PlanName ?? string.Empty));
         }
         catch (HttpRequestException ex)
         {
-            return ProviderUsageFactory.Unavailable(
+            return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
                 "Anthropic",
                 $"Claude OAuth usage endpoint failed: {ex.Message}",
                 credentialsPath,
-                account?.PlanName ?? string.Empty);
+                account?.PlanName ?? string.Empty));
         }
 
         using (response)
         {
-        if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
-        {
-            return ProviderUsageFactory.Unavailable(
-                "Anthropic",
-                "Claude OAuth usage endpoint rejected the cached Claude Code credentials. Local status-line export is preferred; start Claude Code once if no status export exists yet.",
-                credentialsPath,
-                account?.PlanName ?? string.Empty);
+            if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
+                    "Anthropic",
+                    "Claude OAuth usage endpoint rejected the cached Claude Code credentials. Local status-line export is preferred; start Claude Code once if no status export exists yet.",
+                    credentialsPath,
+                    account?.PlanName ?? string.Empty));
+            }
+
+            if (response.StatusCode is System.Net.HttpStatusCode.TooManyRequests)
+            {
+                return OAuthUsageReadResult.RateLimited(ProviderUsageFactory.Unavailable(
+                    "Anthropic",
+                    "Claude live usage endpoint is temporarily rate-limited. Local status-line export will be used if available.",
+                    credentialsPath,
+                    account?.PlanName ?? string.Empty));
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
+                    "Anthropic",
+                    $"Claude OAuth usage endpoint returned {FormatStatusCode(response)}. Local status-line export will be used if it is fresh.",
+                    credentialsPath,
+                    account?.PlanName ?? string.Empty));
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var root = document.RootElement;
+            var windows = new List<UsageWindow>();
+
+            AddOAuthWindow(windows, root, "five_hour", "5h");
+            AddOAuthWindow(windows, root, "seven_day", "7d");
+
+            if (windows.Count == 0)
+            {
+                return OAuthUsageReadResult.None;
+            }
+
+            return OAuthUsageReadResult.Available(new ProviderUsage
+            {
+                Name = "Anthropic",
+                PlanName = account?.PlanName ?? string.Empty,
+                Source = "Claude OAuth usage endpoint",
+                StatusMessage = string.IsNullOrWhiteSpace(account?.PlanName)
+                    ? "Claude quota from local Claude Code OAuth credentials."
+                    : $"Claude {account.PlanName} quota from local Claude Code OAuth credentials.",
+                Windows = windows
+            });
         }
+    }
 
-        response.EnsureSuccessStatusCode();
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        var root = document.RootElement;
-        var windows = new List<UsageWindow>();
-
-        AddOAuthWindow(windows, root, "five_hour", "5h");
-        AddOAuthWindow(windows, root, "seven_day", "7d");
-
-        if (windows.Count == 0)
-        {
-            return null;
-        }
-
-        return new ProviderUsage
-        {
-            Name = "Anthropic",
-            PlanName = account?.PlanName ?? string.Empty,
-            Source = "Claude OAuth usage endpoint",
-            StatusMessage = string.IsNullOrWhiteSpace(account?.PlanName)
-                ? "Claude quota from local Claude Code OAuth credentials."
-                : $"Claude {account.PlanName} quota from local Claude Code OAuth credentials.",
-            Windows = windows
-        };
-        }
+    private static string FormatStatusCode(HttpResponseMessage response)
+    {
+        var status = $"{(int)response.StatusCode} {response.StatusCode}";
+        return string.IsNullOrWhiteSpace(response.ReasonPhrase)
+            ? status
+            : $"{status} ({response.ReasonPhrase})";
     }
 
     private static ClaudeAccount? TryReadClaudeAccount(string credentialsPath)
@@ -574,10 +628,37 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         _commandRefreshPauseMessage = message;
     }
 
+    private void PauseOAuthUsage(DateTimeOffset retryAt, string message)
+    {
+        _nextOAuthUsageAt = retryAt <= DateTimeOffset.Now
+            ? DateTimeOffset.Now.Add(OAuthRateLimitBackoff)
+            : retryAt;
+        _oauthUsagePauseMessage = message;
+    }
+
+    private static void AddStatusNote(List<string> notes, string note)
+    {
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            notes.Add(note);
+        }
+    }
+
     private sealed record LocalUsageReadResult(
         ProviderUsage? FreshUsage,
         ProviderUsage? StaleUsage,
         StaleLocalExport? StaleExport);
+
+    private sealed record OAuthUsageReadResult(ProviderUsage? Usage, bool IsRateLimited)
+    {
+        public static readonly OAuthUsageReadResult None = new(null, false);
+
+        public static OAuthUsageReadResult Available(ProviderUsage usage) => new(usage, false);
+
+        public static OAuthUsageReadResult Unavailable(ProviderUsage usage) => new(usage, false);
+
+        public static OAuthUsageReadResult RateLimited(ProviderUsage usage) => new(usage, true);
+    }
 
     private sealed record ClaudeAccount(string? AccessToken, string PlanName);
 
