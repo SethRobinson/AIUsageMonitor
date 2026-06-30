@@ -510,11 +510,11 @@ public sealed class TrayIconService : IDisposable
                     return;
                 }
 
-                _viewModel.ApplyProvider(provider, "Live/local collectors");
+                _viewModel.ApplyProvider(provider);
                 UpdateLogSummary();
             }
 
-            _viewModel.SetSnapshotMetadata(DateTimeOffset.Now, "Live/local collectors");
+            _viewModel.SetSnapshotMetadata(DateTimeOffset.Now);
             UpdateLogSummary();
         }
         catch (OperationCanceledException ex)
@@ -523,7 +523,7 @@ public sealed class TrayIconService : IDisposable
             {
                 _logService.Warning("Refresh", $"Usage collection timed out or was canceled: {ex.Message}");
                 _viewModel.ClearChecking();
-                _viewModel.SetError("Usage collection timed out. Details were added to the log.", "Live/local collectors");
+                _viewModel.SetError("Usage collection timed out. Details were added to the log.");
                 UpdateLogSummary();
             }
 
@@ -533,7 +533,7 @@ public sealed class TrayIconService : IDisposable
         {
             _logService.Error("Refresh", $"{ex.GetType().Name}: {ex.Message}");
             _viewModel.ClearChecking();
-            _viewModel.SetError("Usage collection failed. Details were added to the log.", "Live/local collectors");
+            _viewModel.SetError("Usage collection failed. Details were added to the log.");
             UpdateLogSummary();
         }
         finally

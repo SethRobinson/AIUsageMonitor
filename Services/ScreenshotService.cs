@@ -22,7 +22,7 @@ internal static class ScreenshotService
 
         var viewModel = new UsageOverlayViewModel();
         var snapshot = RebaseSnapshot(new UsageDataService().Load(), DateTimeOffset.Now);
-        viewModel.ApplySnapshot(snapshot, "Sample data");
+        viewModel.ApplySnapshot(snapshot);
         ApplyCheckingState(viewModel, snapshot);
 
         var window = new UsageOverlayWindow

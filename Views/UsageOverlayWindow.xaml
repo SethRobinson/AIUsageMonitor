@@ -18,6 +18,39 @@
         PreviewMouseLeftButtonDown="WindowOnPreviewMouseLeftButtonDown">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <SolidColorBrush x:Key="IconGlyphBrush" Color="#E5E7EB" />
+        <Pen x:Key="OptionsIconPen"
+             Brush="{StaticResource IconGlyphBrush}"
+             Thickness="1.6"
+             StartLineCap="Round"
+             EndLineCap="Round" />
+        <DrawingImage x:Key="OptionsSlidersIcon">
+            <DrawingImage.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Pen="{StaticResource OptionsIconPen}">
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <LineGeometry StartPoint="2,4" EndPoint="6.2,4" />
+                                <LineGeometry StartPoint="9.8,4" EndPoint="14,4" />
+                                <LineGeometry StartPoint="2,8" EndPoint="3.2,8" />
+                                <LineGeometry StartPoint="6.8,8" EndPoint="14,8" />
+                                <LineGeometry StartPoint="2,12" EndPoint="9.2,12" />
+                                <LineGeometry StartPoint="12.8,12" EndPoint="14,12" />
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="{StaticResource IconGlyphBrush}">
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <EllipseGeometry Center="8,4" RadiusX="1.5" RadiusY="1.5" />
+                                <EllipseGeometry Center="5,8" RadiusX="1.5" RadiusY="1.5" />
+                                <EllipseGeometry Center="11,12" RadiusX="1.5" RadiusY="1.5" />
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                </DrawingGroup>
+            </DrawingImage.Drawing>
+        </DrawingImage>
 
         <Style x:Key="FullOnlyElementStyle" TargetType="{x:Type FrameworkElement}">
             <Setter Property="Visibility" Value="Visible" />
@@ -339,10 +372,14 @@
                     <StackPanel Grid.Column="1"
                                 Orientation="Horizontal"
                                 VerticalAlignment="Top">
-                        <Button Content="⚙"
-                                Style="{StaticResource IconButtonStyle}"
-                                ToolTip="Settings"
-                                Click="SettingsButtonOnClick" />
+                        <Button Style="{StaticResource IconButtonStyle}"
+                                ToolTip="Options"
+                                Click="SettingsButtonOnClick">
+                            <Image Width="16"
+                                   Height="16"
+                                   Source="{StaticResource OptionsSlidersIcon}"
+                                   Stretch="Uniform" />
+                        </Button>
                         <Button Content="↻"
                                 Style="{StaticResource IconButtonStyle}"
                                 ToolTip="Refresh now"
@@ -400,20 +437,14 @@
                     <ItemsControl x:Name="ProvidersList"
                                   Grid.Row="2"
                                   ItemsSource="{Binding Providers}"
+                                  Margin="{Binding ProvidersListMargin, RelativeSource={RelativeSource AncestorType=Window}}"
                                   SizeChanged="ProvidersListOnSizeChanged">
                         <ItemsControl.Style>
                             <Style TargetType="{x:Type ItemsControl}">
                                 <Setter Property="Visibility" Value="Visible" />
-                                <Setter Property="Margin" Value="0,18,0,0" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding HasProviders}" Value="False">
                                         <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compact">
-                                        <Setter Property="Margin" Value="0,0,158,0" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
-                                        <Setter Property="Margin" Value="0" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -663,10 +694,6 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding SourcePathText}"
-                               Foreground="#6B7280"
-                               FontSize="11"
-                               TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Column="1"
                                Margin="16,0,0,0"
                                Text="{Binding LogSummaryText}"
@@ -680,14 +707,20 @@
                 </Grid>
                 </Grid>
 
-                <StackPanel Orientation="Horizontal"
+                <StackPanel x:Name="CompactButtonsPanel"
+                            Orientation="Horizontal"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Top"
-                            Style="{StaticResource CompactButtonsElementStyle}">
-                    <Button Content="⚙"
-                            Style="{StaticResource IconButtonStyle}"
-                            ToolTip="Settings"
-                            Click="SettingsButtonOnClick" />
+                            Style="{StaticResource CompactButtonsElementStyle}"
+                            SizeChanged="CompactButtonsPanelOnSizeChanged">
+                    <Button Style="{StaticResource IconButtonStyle}"
+                            ToolTip="Options"
+                            Click="SettingsButtonOnClick">
+                        <Image Width="16"
+                               Height="16"
+                               Source="{StaticResource OptionsSlidersIcon}"
+                               Stretch="Uniform" />
+                    </Button>
                     <Button Content="↻"
                             Style="{StaticResource IconButtonStyle}"
                             ToolTip="Refresh now"

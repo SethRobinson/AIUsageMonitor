@@ -8,8 +8,7 @@ namespace AIUsageMonitor.ViewModels;
 
 public sealed class UsageOverlayViewModel : INotifyPropertyChanged
 {
-    private string _generatedAtText = "Waiting for fake usage data";
-    private string _sourcePathText = string.Empty;
+    private string _generatedAtText = "Waiting for usage data";
     private string _autoRefreshText = "Auto refresh every 20 minutes";
     private string _logSummaryText = "No recent errors";
     private string _errorMessage = string.Empty;
@@ -24,12 +23,6 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
     {
         get => _generatedAtText;
         private set => SetField(ref _generatedAtText, value);
-    }
-
-    public string SourcePathText
-    {
-        get => _sourcePathText;
-        private set => SetField(ref _sourcePathText, value);
     }
 
     public string AutoRefreshText
@@ -60,7 +53,7 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
 
     public bool HasProviders => Providers.Count > 0;
 
-    public void ApplySnapshot(UsageSnapshot snapshot, string dataPath)
+    public void ApplySnapshot(UsageSnapshot snapshot)
     {
         Providers.Clear();
 
@@ -72,11 +65,10 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(HasProviders));
         var generatedAt = snapshot.GeneratedAt == default ? DateTimeOffset.Now : snapshot.GeneratedAt;
         GeneratedAtText = $"Updated {generatedAt.ToLocalTime():MMM d, yyyy h:mm tt}";
-        SourcePathText = string.IsNullOrWhiteSpace(snapshot.Source) ? dataPath : snapshot.Source;
         ErrorMessage = string.Empty;
     }
 
-    public void ApplyProvider(ProviderUsage provider, string dataPath)
+    public void ApplyProvider(ProviderUsage provider)
     {
         var card = new ProviderUsageCard(provider);
         var existingIndex = FindProviderIndex(provider.Name);
@@ -91,14 +83,12 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(HasProviders));
         }
 
-        SourcePathText = string.IsNullOrWhiteSpace(provider.Source) ? dataPath : provider.Source;
         ErrorMessage = string.Empty;
     }
 
-    public void SetSnapshotMetadata(DateTimeOffset generatedAt, string dataPath)
+    public void SetSnapshotMetadata(DateTimeOffset generatedAt)
     {
         GeneratedAtText = $"Updated {generatedAt.ToLocalTime():MMM d, yyyy h:mm tt}";
-        SourcePathText = dataPath;
         ErrorMessage = string.Empty;
     }
 
@@ -181,10 +171,9 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
         }
     }
 
-    public void SetError(string message, string dataPath)
+    public void SetError(string message)
     {
         ErrorMessage = message;
-        SourcePathText = dataPath;
     }
 
     public void SetAutoRefreshInterval(int minutes)

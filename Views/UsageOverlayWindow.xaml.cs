@@ -25,7 +25,7 @@ public partial class UsageOverlayWindow : Window
     private const double CardAreaTargetAspect = 1.6;
     private const double CardFullMinCellWidth = 265;
     private const double CardFullMinCellHeight = 250;
-    private const double CardCompactMinCellWidth = 210;
+    private const double CardCompactMinCellWidth = 200;
     private const double CardCompactMinCellHeight = 90;
     private const double MaxCardScale = 1.5;
     private const double CardScaleBaseWidth = 300;
@@ -41,7 +41,8 @@ public partial class UsageOverlayWindow : Window
     private const double MiniMinimumRowHeight = 38;
     private const double MiniHorizontalChromeInset = 54;
     private const double CompactHorizontalChromeInset = 28;
-    private const double CompactButtonsHorizontalInset = 180;
+    private const double CompactButtonsFallbackWidth = 175;
+    private const double CompactButtonsGap = 10;
     private const double HeightTrimTolerance = 1;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
@@ -71,6 +72,12 @@ public partial class UsageOverlayWindow : Window
         typeof(double),
         typeof(UsageOverlayWindow),
         new PropertyMetadata(816d));
+
+    public static readonly DependencyProperty ProvidersListMarginProperty = DependencyProperty.Register(
+        nameof(ProvidersListMargin),
+        typeof(Thickness),
+        typeof(UsageOverlayWindow),
+        new PropertyMetadata(new Thickness(0, 18, 0, 0)));
 
     public static readonly DependencyProperty UiScaleProperty = DependencyProperty.Register(
         nameof(UiScale),
@@ -220,6 +227,12 @@ public partial class UsageOverlayWindow : Window
     {
         get => (double)GetValue(ProvidersListWidthProperty);
         private set => SetValue(ProvidersListWidthProperty, value);
+    }
+
+    public Thickness ProvidersListMargin
+    {
+        get => (Thickness)GetValue(ProvidersListMarginProperty);
+        private set => SetValue(ProvidersListMarginProperty, value);
     }
 
     public double UiScale
@@ -379,6 +392,11 @@ public partial class UsageOverlayWindow : Window
         QueueResponsiveLayoutUpdate();
     }
 
+    private void CompactButtonsPanelOnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        QueueResponsiveLayoutUpdate();
+    }
+
     private void WindowOnLoaded(object sender, RoutedEventArgs e)
     {
         QueueResponsiveLayoutUpdate();
@@ -475,9 +493,11 @@ public partial class UsageOverlayWindow : Window
             ShowCompactButtons = showCompactButtons;
         }
 
+        UpdateProvidersListMargin(chromeMode, showCompactButtons);
+
         // Fluid both-axis card grid: pick the column count that best fills the available area,
         // then derive each card's detail level from the resulting cell size (not the window width).
-        var availableWidth = Math.Max(1, widthDip - EstimatedHorizontalChromeInset(chromeMode, showCompactButtons));
+        var availableWidth = Math.Max(1, widthDip - GetHorizontalChromeInset(chromeMode, showCompactButtons));
         var availableHeight = Math.Max(1, heightDip - GetVerticalChromeInset(chromeMode));
         var columns = ChooseCardColumns(availableWidth, availableHeight, providerCount);
         if (CardColumns != columns)
@@ -509,6 +529,41 @@ public partial class UsageOverlayWindow : Window
         // Height is intentionally left free (no trim-to-content) so dragging down actually grows it.
         MinWidth = ToPhysicalDimension(MiniHorizontalChromeInset + MiniMinimumCardWidth, uiScale);
         MinHeight = ToPhysicalDimension(MiniMinimumVerticalInset + MiniMinimumRowHeight, uiScale);
+    }
+
+    private void UpdateProvidersListMargin(string displayMode, bool showCompactButtons)
+    {
+        var margin = displayMode switch
+        {
+            MiniDisplayMode => new Thickness(0),
+            CompactDisplayMode when showCompactButtons => new Thickness(0, 0, GetCompactButtonsRightInset(), 0),
+            CompactDisplayMode => new Thickness(0),
+            _ => new Thickness(0, 18, 0, 0)
+        };
+
+        if (ProvidersListMargin != margin)
+        {
+            ProvidersListMargin = margin;
+        }
+    }
+
+    private double GetHorizontalChromeInset(string displayMode, bool showCompactButtons)
+    {
+        return displayMode switch
+        {
+            MiniDisplayMode => MiniHorizontalChromeInset,
+            CompactDisplayMode => CompactHorizontalChromeInset + (showCompactButtons ? GetCompactButtonsRightInset() : 0),
+            _ => 84
+        };
+    }
+
+    private double GetCompactButtonsRightInset()
+    {
+        var buttonsWidth = CompactButtonsPanel is { ActualWidth: > 0 } panel
+            ? panel.ActualWidth
+            : CompactButtonsFallbackWidth;
+
+        return Math.Ceiling(buttonsWidth + CompactButtonsGap);
     }
 
     private static double GetVerticalChromeInset(string displayMode)
@@ -682,7 +737,7 @@ public partial class UsageOverlayWindow : Window
         return displayMode switch
         {
             MiniDisplayMode => MiniHorizontalChromeInset,
-            CompactDisplayMode => showCompactButtons ? CompactButtonsHorizontalInset : CompactHorizontalChromeInset,
+            CompactDisplayMode => CompactHorizontalChromeInset + (showCompactButtons ? CompactButtonsFallbackWidth + CompactButtonsGap : 0),
             _ => 84
         };
     }

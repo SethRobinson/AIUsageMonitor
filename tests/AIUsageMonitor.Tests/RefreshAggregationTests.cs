@@ -111,7 +111,7 @@ public sealed class RefreshAggregationTests
         var viewModel = new UsageOverlayViewModel();
         viewModel.SetChecking(["Fast", "Slow"]);
 
-        viewModel.ApplyProvider(BuildUsage("Fast", 10), "test");
+        viewModel.ApplyProvider(BuildUsage("Fast", 10));
 
         var fast = viewModel.Providers.Single(provider => provider.ShortName == "Fast");
         var slow = viewModel.Providers.Single(provider => provider.ShortName == "Slow");
