@@ -452,7 +452,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             };
         }
 
-        windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, resetAt));
+        windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, NormalizeResetAt(usedPercent, resetAt)));
     }
 
     private static void AddClaudeWindow(List<UsageWindow> windows, JsonElement container, string propertyName, string title)
@@ -480,7 +480,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             };
         }
 
-        windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, resetAt));
+        windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, NormalizeResetAt(usedPercent, resetAt)));
     }
 
     private static bool TryGetDouble(JsonElement element, string propertyName, out double value)
@@ -498,6 +498,18 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             JsonValueKind.String => double.TryParse(property.GetString(), out value),
             _ => false
         };
+    }
+
+    private static DateTimeOffset? NormalizeResetAt(double usedPercent, DateTimeOffset? resetAt)
+    {
+        if (usedPercent <= 0.1 &&
+            resetAt is { } resetAtValue &&
+            resetAtValue <= DateTimeOffset.Now.AddMinutes(-1))
+        {
+            return null;
+        }
+
+        return resetAt;
     }
 
     private static ProviderUsage? TryParseText(string text, string path, string planName)
