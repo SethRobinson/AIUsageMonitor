@@ -99,7 +99,7 @@ public sealed class CodexLogUsageCollector : IUsageCollector
             return ProviderUsageFactory.Unavailable(ProviderName, message, sessionsDirectory);
         }
 
-        return BuildProviderUsage(latest, refreshNote);
+        return BuildProviderUsage(latest, refreshNote, now);
     }
 
     private static CodexRateLimitSnapshot? TryReadLatestSnapshot(string sessionsDirectory, CancellationToken cancellationToken)
@@ -135,8 +135,25 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         return latest;
     }
 
-    private ProviderUsage BuildProviderUsage(CodexRateLimitSnapshot latest, string refreshNote)
+    internal ProviderUsage BuildProviderUsage(
+        CodexRateLimitSnapshot latest,
+        string refreshNote,
+        DateTimeOffset now)
     {
+        var planName = PlanNameFormatter.Format(latest.PlanType);
+        var source = latest.SourceFile ?? "Codex local session logs";
+
+        if (HasAnyKnownResetWindowPassed(latest, now))
+        {
+            var message = "Codex quota snapshot is stale; at least one known reset time has already passed, and no fresh quota snapshot was available. Open Codex or refresh again to write a current local quota event.";
+            if (!string.IsNullOrWhiteSpace(refreshNote))
+            {
+                message += " " + refreshNote;
+            }
+
+            return ProviderUsageFactory.Unavailable(ProviderName, message, source, planName);
+        }
+
         var windows = new List<UsageWindow>();
 
         if (latest.Primary is not null)
@@ -155,7 +172,6 @@ public sealed class CodexLogUsageCollector : IUsageCollector
                 latest.Secondary.ResetsAt));
         }
 
-        var planName = PlanNameFormatter.Format(latest.PlanType);
         var statusMessage = string.IsNullOrWhiteSpace(planName)
             ? "Codex quota from latest local token-count event."
             : $"Codex {planName} quota from latest local token-count event.";
@@ -169,7 +185,7 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         {
             Name = ProviderName,
             PlanName = planName,
-            Source = "Codex local session logs",
+            Source = source,
             StatusMessage = statusMessage,
             Windows = windows
         };
@@ -209,7 +225,7 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         }
     }
 
-    private static CodexRateLimitSnapshot? TryParseRateLimitLine(string line)
+    internal static CodexRateLimitSnapshot? TryParseRateLimitLine(string line)
     {
         try
         {
@@ -227,7 +243,11 @@ public sealed class CodexLogUsageCollector : IUsageCollector
 
             var timestamp = root.TryGetProperty("timestamp", out var timestampElement) &&
                             timestampElement.ValueKind == JsonValueKind.String &&
-                            DateTimeOffset.TryParse(timestampElement.GetString(), out var parsedTimestamp)
+                            DateTimeOffset.TryParse(
+                                timestampElement.GetString(),
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                                out var parsedTimestamp)
                 ? parsedTimestamp
                 : DateTimeOffset.MinValue;
 
@@ -291,7 +311,11 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         return property.ValueKind switch
         {
             JsonValueKind.Number when property.TryGetDouble(out var value) => value,
-            JsonValueKind.String when double.TryParse(property.GetString(), out var value) => value,
+            JsonValueKind.String when double.TryParse(
+                property.GetString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var value) => value,
             _ => null
         };
     }
@@ -306,7 +330,11 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         return property.ValueKind switch
         {
             JsonValueKind.Number when property.TryGetInt32(out var value) => value,
-            JsonValueKind.String when int.TryParse(property.GetString(), out var value) => value,
+            JsonValueKind.String when int.TryParse(
+                property.GetString(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var value) => value,
             _ => null
         };
     }
@@ -324,7 +352,11 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         }
 
         return property.ValueKind == JsonValueKind.String &&
-               long.TryParse(property.GetString(), out unixSeconds)
+               long.TryParse(
+                   property.GetString(),
+                   NumberStyles.Integer,
+                   CultureInfo.InvariantCulture,
+                   out unixSeconds)
             ? DateTimeOffset.FromUnixTimeSeconds(unixSeconds)
             : null;
     }
@@ -368,6 +400,12 @@ public sealed class CodexLogUsageCollector : IUsageCollector
             .Max();
 
         return retryAt == default ? null : retryAt;
+    }
+
+    private static bool HasAnyKnownResetWindowPassed(CodexRateLimitSnapshot latest, DateTimeOffset now)
+    {
+        return EnumerateWindows(latest)
+            .Any(window => window.ResetsAt is not null && window.ResetsAt.Value.ToLocalTime() <= now.AddMinutes(-1));
     }
 
     private static IEnumerable<CodexWindow> EnumerateWindows(CodexRateLimitSnapshot snapshot)
@@ -474,7 +512,7 @@ public sealed class CodexLogUsageCollector : IUsageCollector
             $"windowMinutes={window.WindowMinutes}, {resetInfo}");
     }
 
-    private sealed record CodexRateLimitSnapshot(
+    internal sealed record CodexRateLimitSnapshot(
         DateTimeOffset Timestamp,
         CodexWindow? Primary,
         CodexWindow? Secondary,
@@ -483,5 +521,5 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         public string? SourceFile { get; init; }
     }
 
-    private sealed record CodexWindow(double UsedPercent, int WindowMinutes, DateTimeOffset? ResetsAt);
+    internal sealed record CodexWindow(double UsedPercent, int WindowMinutes, DateTimeOffset? ResetsAt);
 }

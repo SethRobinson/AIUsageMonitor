@@ -8,6 +8,77 @@ internal static class CliQuotaRefreshRunner
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(45);
     private const int DiagnosticOutputCap = 8000;
+    private static readonly string[] QuotaExhaustionPhrases =
+    [
+        "too many requests",
+        "rate limit",
+        "usage limit",
+        "limit reached",
+        "maximum usage",
+        "quota",
+        "exhausted",
+        "レート制限",
+        "使用制限",
+        "利用制限",
+        "上限",
+        "クォータ",
+        "クオータ",
+        "リクエストが多すぎ",
+        "制限に達",
+        "trop de requêtes",
+        "limite de débit",
+        "limite d'utilisation",
+        "limite atteinte",
+        "zu viele anfragen",
+        "ratenlimit",
+        "nutzungslimit",
+        "kontingent",
+        "limit erreicht",
+        "demasiadas solicitudes",
+        "límite de uso",
+        "límite alcanzado",
+        "cuota",
+        "agotado",
+        "muitas solicitações",
+        "limite de taxa",
+        "limite de uso",
+        "limite atingido",
+        "cota",
+        "esgotado",
+        "troppe richieste",
+        "limite di frequenza",
+        "limite di utilizzo",
+        "limite raggiunto",
+        "esaurito",
+        "te veel aanvragen",
+        "gebruikslimiet",
+        "limiet bereikt",
+        "quotum",
+        "zbyt wiele żądań",
+        "limit użycia",
+        "limit osiągnięty",
+        "wyczerpano",
+        "请求过多",
+        "速率限制",
+        "使用限制",
+        "已达到限制",
+        "配额",
+        "請求過多",
+        "速率限制",
+        "使用限制",
+        "已達到限制",
+        "配額",
+        "요청이 너무 많",
+        "사용 한도",
+        "속도 제한",
+        "한도에 도달",
+        "할당량",
+        "слишком много запросов",
+        "лимит использования",
+        "лимит достигнут",
+        "квота",
+        "исчерпан"
+    ];
 
     public static Task<CliQuotaRefreshResult> RefreshCodexAsync(
         CancellationToken cancellationToken,
@@ -200,6 +271,10 @@ internal static class CliQuotaRefreshRunner
 
         startInfo.Environment["NO_COLOR"] = "1";
         startInfo.Environment["TERM"] = "dumb";
+        startInfo.Environment["LANG"] = "en_US.UTF-8";
+        startInfo.Environment["LC_ALL"] = "en_US.UTF-8";
+        startInfo.Environment["LC_MESSAGES"] = "en_US.UTF-8";
+        startInfo.Environment["LANGUAGE"] = "en_US:en";
 
         foreach (var arg in processArgs)
         {
@@ -279,7 +354,7 @@ internal static class CliQuotaRefreshRunner
             : text[..DiagnosticOutputCap] + $"…(+{text.Length - DiagnosticOutputCap} more chars)";
     }
 
-    private static bool LooksQuotaExhausted(string output)
+    internal static bool LooksQuotaExhausted(string output)
     {
         if (string.IsNullOrWhiteSpace(output))
         {
@@ -288,13 +363,7 @@ internal static class CliQuotaRefreshRunner
 
         var lower = output.ToLowerInvariant();
         return lower.Contains("429", StringComparison.Ordinal) ||
-            lower.Contains("too many requests", StringComparison.Ordinal) ||
-            lower.Contains("rate limit", StringComparison.Ordinal) ||
-            lower.Contains("usage limit", StringComparison.Ordinal) ||
-            lower.Contains("limit reached", StringComparison.Ordinal) ||
-            lower.Contains("maximum usage", StringComparison.Ordinal) ||
-            lower.Contains("quota", StringComparison.Ordinal) ||
-            lower.Contains("exhausted", StringComparison.Ordinal);
+            QuotaExhaustionPhrases.Any(phrase => lower.Contains(phrase, StringComparison.Ordinal));
     }
 
     private static void TryKill(Process process)
