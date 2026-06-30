@@ -13,6 +13,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
     private const string LegacyExportName = "apimonitor-usage.json";
     private const string ExporterScriptName = "ai-usage-monitor-statusline.ps1";
     private static readonly TimeSpan LocalExportMaxAge = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan PassedResetStaleGrace = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan CommandSuccessCooldown = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan CommandFailureBackoff = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan CommandUnavailableBackoff = TimeSpan.FromHours(1);
@@ -122,7 +123,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
         if (localUsage.StaleExport is not null)
         {
-            var staleMessage = $"Claude status export is stale; last update was {FormatRelativeAge(localUsage.StaleExport.UpdatedAt)}. Start Claude Code and send one prompt, or wait for OAuth usage collection to recover.";
+            var staleMessage = $"{FormatStaleExportMessage(localUsage.StaleExport)} Start Claude Code and send one prompt, or wait for OAuth usage collection to recover.";
             var refreshNote = string.Join(" ", statusNotes);
             if (!string.IsNullOrWhiteSpace(refreshNote))
             {
@@ -167,6 +168,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         ProviderUsage? freshLocalUsage = null;
         ProviderUsage? staleLocalUsage = null;
         StaleLocalExport? staleLocalExport = null;
+        var now = DateTimeOffset.Now;
 
         foreach (var path in candidatePaths)
         {
@@ -184,11 +186,28 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
             if (!IsFreshLocalExport(path, text, out var exportUpdatedAt))
             {
-                if (staleLocalExport is null || exportUpdatedAt > staleLocalExport.UpdatedAt)
-                {
-                    staleLocalExport = new StaleLocalExport(path, exportUpdatedAt);
-                    staleLocalUsage = usage is not null && !usage.IsUnavailable ? usage : staleLocalUsage;
-                }
+                TrackStaleLocalExport(
+                    path,
+                    exportUpdatedAt,
+                    StaleLocalExportReason.FileTooOld,
+                    usage,
+                    ref staleLocalUsage,
+                    ref staleLocalExport);
+
+                continue;
+            }
+
+            if (usage is not null &&
+                !usage.IsUnavailable &&
+                HasPassedResetWindow(usage, now))
+            {
+                TrackStaleLocalExport(
+                    path,
+                    exportUpdatedAt,
+                    StaleLocalExportReason.PassedResetWindow,
+                    usage,
+                    ref staleLocalUsage,
+                    ref staleLocalExport);
 
                 continue;
             }
@@ -201,6 +220,21 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         }
 
         return new LocalUsageReadResult(freshLocalUsage, staleLocalUsage, staleLocalExport);
+    }
+
+    private static void TrackStaleLocalExport(
+        string path,
+        DateTimeOffset exportUpdatedAt,
+        StaleLocalExportReason reason,
+        ProviderUsage? usage,
+        ref ProviderUsage? staleLocalUsage,
+        ref StaleLocalExport? staleLocalExport)
+    {
+        if (staleLocalExport is null || exportUpdatedAt > staleLocalExport.UpdatedAt)
+        {
+            staleLocalExport = new StaleLocalExport(path, exportUpdatedAt, reason);
+            staleLocalUsage = usage is not null && !usage.IsUnavailable ? usage : staleLocalUsage;
+        }
     }
 
     private static ProviderUsage? TryParseJson(string text, string path, string fallbackPlanName)
@@ -291,6 +325,17 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         return $"{Math.Max(1, (int)Math.Round(elapsed.TotalDays))} days ago";
     }
 
+    private static string FormatStaleExportMessage(StaleLocalExport staleExport)
+    {
+        return staleExport.Reason switch
+        {
+            StaleLocalExportReason.PassedResetWindow =>
+                $"Claude status export has stale quota data; it contains a reset timestamp that already passed even though the file was updated {FormatRelativeAge(staleExport.UpdatedAt)}.",
+            _ =>
+                $"Claude status export is stale; last update was {FormatRelativeAge(staleExport.UpdatedAt)}."
+        };
+    }
+
     private async Task<OAuthUsageReadResult> TryCollectOAuthUsageAsync(
         string claudeDirectory,
         ClaudeAccount? account,
@@ -369,8 +414,10 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             var root = document.RootElement;
             var windows = new List<UsageWindow>();
 
-            AddOAuthWindow(windows, root, "five_hour", "5h");
-            AddOAuthWindow(windows, root, "seven_day", "7d");
+            AddOAuthLimitWindows(windows, root);
+            AddOAuthWindowIfMissing(windows, root, "five_hour", "5h");
+            AddOAuthWindowIfMissing(windows, root, "seven_day", "7d");
+            AddOAuthWindowIfMissing(windows, root, "seven_day_sonnet", "Sonnet");
 
             if (windows.Count == 0)
             {
@@ -441,18 +488,72 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             return;
         }
 
-        DateTimeOffset? resetAt = null;
-        if (window.TryGetProperty("resets_at", out var resetElement))
-        {
-            resetAt = resetElement.ValueKind switch
-            {
-                JsonValueKind.Number => DateTimeOffset.FromUnixTimeSeconds(resetElement.GetInt64()),
-                JsonValueKind.String when DateTimeOffset.TryParse(resetElement.GetString(), out var parsed) => parsed,
-                _ => null
-            };
-        }
+        var resetAt = TryGetResetAt(window);
 
         windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, NormalizeResetAt(usedPercent, resetAt)));
+    }
+
+    private static void AddOAuthWindowIfMissing(List<UsageWindow> windows, JsonElement root, string propertyName, string title)
+    {
+        if (windows.Any(window => string.Equals(window.Title, title, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        AddOAuthWindow(windows, root, propertyName, title);
+    }
+
+    private static void AddOAuthLimitWindows(List<UsageWindow> windows, JsonElement root)
+    {
+        if (!root.TryGetProperty("limits", out var limits) ||
+            limits.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var limit in limits.EnumerateArray())
+        {
+            if (limit.ValueKind != JsonValueKind.Object ||
+                !TryGetDouble(limit, "percent", out var usedPercent))
+            {
+                continue;
+            }
+
+            var title = GetOAuthLimitTitle(limit);
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                continue;
+            }
+
+            var resetAt = TryGetResetAt(limit);
+            windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, NormalizeResetAt(usedPercent, resetAt)));
+        }
+    }
+
+    private static string GetOAuthLimitTitle(JsonElement limit)
+    {
+        var kind = TryGetString(limit, "kind");
+        var group = TryGetString(limit, "group");
+        if (string.Equals(kind, "session", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(group, "session", StringComparison.OrdinalIgnoreCase))
+        {
+            return "5h";
+        }
+
+        if (string.Equals(kind, "weekly_all", StringComparison.OrdinalIgnoreCase))
+        {
+            return "7d";
+        }
+
+        if (string.Equals(kind, "weekly_scoped", StringComparison.OrdinalIgnoreCase))
+        {
+            var modelName = limit.TryGetProperty("scope", out var scope)
+                ? TryFindStringProperty(scope, "display_name")
+                : null;
+            return PlanNameFormatter.Format(modelName);
+        }
+
+        return string.Empty;
     }
 
     private static void AddClaudeWindow(List<UsageWindow> windows, JsonElement container, string propertyName, string title)
@@ -468,19 +569,9 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             return;
         }
 
-        DateTimeOffset? resetAt = null;
-        if (window.TryGetProperty("resets_at", out var resetElement) ||
-            window.TryGetProperty("reset_at", out resetElement))
-        {
-            resetAt = resetElement.ValueKind switch
-            {
-                JsonValueKind.Number => DateTimeOffset.FromUnixTimeSeconds(resetElement.GetInt64()),
-                JsonValueKind.String when DateTimeOffset.TryParse(resetElement.GetString(), out var parsed) => parsed,
-                _ => null
-            };
-        }
+        var resetAt = TryGetResetAt(window);
 
-        windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, NormalizeResetAt(usedPercent, resetAt)));
+        windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, resetAt));
     }
 
     private static bool TryGetDouble(JsonElement element, string propertyName, out double value)
@@ -500,6 +591,30 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         };
     }
 
+    private static string? TryGetString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) &&
+            property.ValueKind == JsonValueKind.String
+                ? property.GetString()
+                : null;
+    }
+
+    private static DateTimeOffset? TryGetResetAt(JsonElement element)
+    {
+        if (!element.TryGetProperty("resets_at", out var resetElement) &&
+            !element.TryGetProperty("reset_at", out resetElement))
+        {
+            return null;
+        }
+
+        return resetElement.ValueKind switch
+        {
+            JsonValueKind.Number => DateTimeOffset.FromUnixTimeSeconds(resetElement.GetInt64()),
+            JsonValueKind.String when DateTimeOffset.TryParse(resetElement.GetString(), out var parsed) => parsed,
+            _ => null
+        };
+    }
+
     private static DateTimeOffset? NormalizeResetAt(double usedPercent, DateTimeOffset? resetAt)
     {
         if (usedPercent <= 0.1 &&
@@ -510,6 +625,14 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         }
 
         return resetAt;
+    }
+
+    private static bool HasPassedResetWindow(ProviderUsage usage, DateTimeOffset now)
+    {
+        return usage.Windows.Any(window =>
+            !window.IsInactive &&
+            window.ResetAt is { } resetAt &&
+            resetAt <= now.Subtract(PassedResetStaleGrace));
     }
 
     private static ProviderUsage? TryParseText(string text, string path, string planName)
@@ -674,7 +797,13 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
     private sealed record ClaudeAccount(string? AccessToken, string PlanName);
 
-    private sealed record StaleLocalExport(string Path, DateTimeOffset UpdatedAt);
+    private enum StaleLocalExportReason
+    {
+        FileTooOld,
+        PassedResetWindow
+    }
+
+    private sealed record StaleLocalExport(string Path, DateTimeOffset UpdatedAt, StaleLocalExportReason Reason);
 
     [GeneratedRegex(@"5h\s*=\s*(?<used>\d+(?:\.\d+)?)%", RegexOptions.IgnoreCase)]
     private static partial Regex FiveHourRegex();

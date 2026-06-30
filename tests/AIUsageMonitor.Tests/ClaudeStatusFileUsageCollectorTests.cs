@@ -3,7 +3,6 @@ using System.Net.Http;
 using System.IO;
 using AIUsageMonitor.Collectors;
 using AIUsageMonitor.Models;
-using AIUsageMonitor.ViewModels;
 
 namespace AIUsageMonitor.Tests;
 
@@ -50,9 +49,11 @@ public sealed class ClaudeStatusFileUsageCollectorTests
     }
 
     [TestMethod]
-    public async Task PassedResetOnFullLocalWindowIsTreatedAsNoActiveReset()
+    public async Task PassedResetInFreshLocalStatusFallsBackToOAuthUsage()
     {
         var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        var fiveHourResetAt = DateTimeOffset.Now.AddHours(3);
+        var sevenDayResetAt = DateTimeOffset.Now.AddDays(6);
         WriteClaudeCredentialsAndStatusExport(
             homeDirectory,
             DateTimeOffset.Now,
@@ -60,24 +61,30 @@ public sealed class ClaudeStatusFileUsageCollectorTests
             fiveHourResetAt: DateTimeOffset.Now.AddHours(-2),
             sevenDayUsedPercent: 6,
             sevenDayResetAt: DateTimeOffset.Now.AddDays(6));
-        var handler = new StubHttpMessageHandler(HttpStatusCode.TooManyRequests);
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            BuildOAuthUsageResponse(fiveHourResetAt, sevenDayResetAt));
         using var httpClient = new HttpClient(handler);
         var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
 
         var usage = await collector.CollectAsync(CancellationToken.None);
 
         Assert.IsFalse(usage.IsUnavailable);
-        var fiveHour = usage.Windows.Single(window => window.Title == "5h");
-        Assert.AreEqual(0, fiveHour.Used);
-        Assert.IsNull(fiveHour.ResetAt);
+        Assert.AreEqual("Claude OAuth usage endpoint", usage.Source);
+        Assert.AreEqual(3, usage.Windows.Count);
 
-        var display = new UsageWindowDisplay(fiveHour);
-        Assert.AreEqual("No active reset", display.ResetText);
-        Assert.AreEqual(string.Empty, display.ResetRelativeText);
+        var fiveHour = usage.Windows.Single(window => window.Title == "5h");
+        Assert.AreEqual(15, fiveHour.Used);
+        Assert.AreEqual(fiveHourResetAt, fiveHour.ResetAt);
 
         var sevenDay = usage.Windows.Single(window => window.Title == "7d");
-        Assert.IsNotNull(sevenDay.ResetAt);
-        Assert.AreEqual(0, handler.CallCount);
+        Assert.AreEqual(9, sevenDay.Used);
+        Assert.AreEqual(sevenDayResetAt, sevenDay.ResetAt);
+
+        var sonnet = usage.Windows.Single(window => window.Title == "Sonnet");
+        Assert.AreEqual(2, sonnet.Used);
+        Assert.AreEqual(sevenDayResetAt, sonnet.ResetAt);
+        Assert.AreEqual(1, handler.CallCount);
     }
 
     private static void WriteClaudeCredentialsAndStatusExport(
@@ -124,7 +131,40 @@ public sealed class ClaudeStatusFileUsageCollectorTests
             """);
     }
 
-    private sealed class StubHttpMessageHandler(HttpStatusCode statusCode) : HttpMessageHandler
+    private static string BuildOAuthUsageResponse(DateTimeOffset fiveHourResetAt, DateTimeOffset sevenDayResetAt)
+    {
+        return $$"""
+        {
+          "limits": [
+            {
+              "kind": "session",
+              "group": "session",
+              "percent": 15,
+              "resets_at": "{{fiveHourResetAt:O}}"
+            },
+            {
+              "kind": "weekly_all",
+              "group": "weekly",
+              "percent": 9,
+              "resets_at": "{{sevenDayResetAt:O}}"
+            },
+            {
+              "kind": "weekly_scoped",
+              "group": "weekly",
+              "percent": 2,
+              "resets_at": "{{sevenDayResetAt:O}}",
+              "scope": {
+                "model": {
+                  "display_name": "Sonnet"
+                }
+              }
+            }
+          ]
+        }
+        """;
+    }
+
+    private sealed class StubHttpMessageHandler(HttpStatusCode statusCode, string content = "") : HttpMessageHandler
     {
         private int _callCount;
 
@@ -133,7 +173,13 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _callCount);
-            return Task.FromResult(new HttpResponseMessage(statusCode));
+            var response = new HttpResponseMessage(statusCode);
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                response.Content = new StringContent(content);
+            }
+
+            return Task.FromResult(response);
         }
     }
 }
