@@ -87,6 +87,46 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         Assert.AreEqual(1, handler.CallCount);
     }
 
+    [TestMethod]
+    public async Task LocalStatusExportWithNullRateLimitsDoesNotThrow()
+    {
+        // The status-line exporter writes "rate_limits": null when Claude Code has not
+        // surfaced rate_limits yet. Parsing must degrade gracefully, not throw
+        // InvalidOperationException (which would fail the whole card and back off).
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+        File.WriteAllText(
+            Path.Combine(claudeDirectory, ".credentials.json"),
+            """
+            {
+              "claudeAiOauth": {
+                "accessToken": "test-token",
+                "subscriptionType": "pro",
+                "rateLimitTier": "default"
+              }
+            }
+            """);
+        File.WriteAllText(
+            Path.Combine(claudeDirectory, "ai-usage-monitor-usage.json"),
+            $$"""
+            {
+              "generatedAt": "{{DateTimeOffset.Now:O}}",
+              "status": "missing_rate_limits",
+              "rate_limits": null
+            }
+            """);
+        var handler = new StubHttpMessageHandler(HttpStatusCode.TooManyRequests);
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var usage = await collector.CollectAsync(CancellationToken.None);
+
+        Assert.AreEqual(KnownProviders.Anthropic, usage.Name);
+        Assert.IsTrue(usage.IsUnavailable);
+        Assert.AreEqual(0, usage.Windows.Count);
+    }
+
     private static void WriteClaudeCredentialsAndStatusExport(
         string homeDirectory,
         DateTimeOffset generatedAt,

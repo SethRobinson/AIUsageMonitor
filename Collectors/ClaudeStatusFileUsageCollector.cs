@@ -243,6 +243,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         {
             using var document = JsonDocument.Parse(text);
             var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
             var planName = TryGetClaudePlanName(root, fallbackPlanName);
             var windows = new List<UsageWindow>();
 
@@ -279,7 +284,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
                 Windows = windows
             };
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             return null;
         }
@@ -294,14 +299,15 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             try
             {
                 using var document = JsonDocument.Parse(text);
-                if (document.RootElement.TryGetProperty("generatedAt", out var generatedAtElement) &&
+                if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                    document.RootElement.TryGetProperty("generatedAt", out var generatedAtElement) &&
                     generatedAtElement.ValueKind == JsonValueKind.String &&
                     DateTimeOffset.TryParse(generatedAtElement.GetString(), out var generatedAt))
                 {
                     exportUpdatedAt = generatedAt;
                 }
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
             {
             }
         }
@@ -410,14 +416,25 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            var root = document.RootElement;
             var windows = new List<UsageWindow>();
+            try
+            {
+                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+                var root = document.RootElement;
 
-            AddOAuthLimitWindows(windows, root);
-            AddOAuthWindowIfMissing(windows, root, "five_hour", "5h");
-            AddOAuthWindowIfMissing(windows, root, "seven_day", "7d");
-            AddOAuthWindowIfMissing(windows, root, "seven_day_sonnet", "Sonnet");
+                AddOAuthLimitWindows(windows, root);
+                AddOAuthWindowIfMissing(windows, root, "five_hour", "5h");
+                AddOAuthWindowIfMissing(windows, root, "seven_day", "7d");
+                AddOAuthWindowIfMissing(windows, root, "seven_day_sonnet", "Sonnet");
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+            {
+                return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
+                    "Anthropic",
+                    $"Claude OAuth usage endpoint returned an unexpected response shape: {ex.Message}. Local status-line export will be used if it is fresh.",
+                    credentialsPath,
+                    account?.PlanName ?? string.Empty));
+            }
 
             if (windows.Count == 0)
             {
@@ -451,17 +468,23 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         {
             using var document = JsonDocument.Parse(File.ReadAllText(credentialsPath));
             var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
             var subscriptionType = TryFindStringProperty(root, "subscriptionType");
             var rateLimitTier = TryFindStringProperty(root, "rateLimitTier");
             var planName = PlanNameFormatter.FormatClaude(subscriptionType, rateLimitTier);
 
             if (root.TryGetProperty("claudeAiOauth", out var oauth) &&
+                oauth.ValueKind == JsonValueKind.Object &&
                 oauth.TryGetProperty("accessToken", out var tokenElement))
             {
                 return new ClaudeAccount(tokenElement.GetString(), planName);
             }
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
         }
         catch (IOException)
@@ -505,7 +528,8 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
     private static void AddOAuthLimitWindows(List<UsageWindow> windows, JsonElement root)
     {
-        if (!root.TryGetProperty("limits", out var limits) ||
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("limits", out var limits) ||
             limits.ValueKind != JsonValueKind.Array)
         {
             return;
@@ -558,7 +582,9 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
     private static void AddClaudeWindow(List<UsageWindow> windows, JsonElement container, string propertyName, string title)
     {
-        if (!container.TryGetProperty(propertyName, out var window))
+        if (container.ValueKind != JsonValueKind.Object ||
+            !container.TryGetProperty(propertyName, out var window) ||
+            window.ValueKind != JsonValueKind.Object)
         {
             return;
         }
@@ -578,7 +604,8 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
     {
         value = 0;
 
-        if (!element.TryGetProperty(propertyName, out var property))
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var property))
         {
             return false;
         }
@@ -593,7 +620,8 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
     private static string? TryGetString(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out var property) &&
+        return element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty(propertyName, out var property) &&
             property.ValueKind == JsonValueKind.String
                 ? property.GetString()
                 : null;
@@ -601,8 +629,9 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
     private static DateTimeOffset? TryGetResetAt(JsonElement element)
     {
-        if (!element.TryGetProperty("resets_at", out var resetElement) &&
-            !element.TryGetProperty("reset_at", out resetElement))
+        if (element.ValueKind != JsonValueKind.Object ||
+            (!element.TryGetProperty("resets_at", out var resetElement) &&
+            !element.TryGetProperty("reset_at", out resetElement)))
         {
             return null;
         }
