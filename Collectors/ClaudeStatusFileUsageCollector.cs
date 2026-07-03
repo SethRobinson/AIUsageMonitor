@@ -11,6 +11,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
 {
     private const string ExportName = "ai-usage-monitor-usage.json";
     private const string LegacyExportName = "apimonitor-usage.json";
+    private const string ProfileCacheName = "ai-usage-monitor-profile.json";
     private const string ExporterScriptName = "ai-usage-monitor-statusline.ps1";
     private static readonly TimeSpan LocalExportMaxAge = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan PassedResetStaleGrace = TimeSpan.FromMinutes(1);
@@ -19,6 +20,12 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     private static readonly TimeSpan CommandUnavailableBackoff = TimeSpan.FromHours(1);
     private static readonly TimeSpan OAuthRateLimitBackoff = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan UnknownExhaustionBackoff = TimeSpan.FromMinutes(30);
+    private static readonly JsonSerializerOptions ProfileCacheJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+
     private DateTimeOffset _nextCommandRefreshAt = DateTimeOffset.MinValue;
     private string _commandRefreshPauseMessage = string.Empty;
     private DateTimeOffset _nextOAuthUsageAt = DateTimeOffset.MinValue;
@@ -50,8 +57,10 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         var home = _homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var claudeDirectory = Path.Combine(home, ".claude");
         var credentialsPath = Path.Combine(claudeDirectory, ".credentials.json");
+        var profileCachePath = Path.Combine(claudeDirectory, ProfileCacheName);
         var account = TryReadClaudeAccount(credentialsPath);
-        var planName = ResolvePlanName(account);
+        var cachedPlanName = TryReadCachedPlanName(profileCachePath);
+        var planName = ResolvePlanName(account, cachedPlanName);
         var candidatePaths = new[]
         {
             Path.Combine(claudeDirectory, ExportName),
@@ -60,9 +69,13 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             Path.Combine(claudeDirectory, "usage-status.md")
         };
 
-        if (forceRefresh && RememberLivePlanName(await TryCollectOAuthProfilePlanNameAsync(claudeDirectory, account, cancellationToken)))
+        if (forceRefresh &&
+            RememberLivePlanName(
+                await TryCollectOAuthProfilePlanNameAsync(claudeDirectory, account, cancellationToken),
+                profileCachePath,
+                ref cachedPlanName))
         {
-            planName = ResolvePlanName(account);
+            planName = ResolvePlanName(account, cachedPlanName);
         }
 
         var localUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
@@ -83,10 +96,10 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         }
         else
         {
-            oauthUsage = await TryCollectOAuthUsageAsync(claudeDirectory, account, cancellationToken);
-            if (RememberLivePlanName(oauthUsage.LivePlanName))
+            oauthUsage = await TryCollectOAuthUsageAsync(claudeDirectory, account, planName, cancellationToken);
+            if (RememberLivePlanName(oauthUsage.LivePlanName, profileCachePath, ref cachedPlanName))
             {
-                planName = ResolvePlanName(account);
+                planName = ResolvePlanName(account, cachedPlanName);
                 localUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
             }
 
@@ -122,7 +135,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         {
             var refreshResult = await CliQuotaRefreshRunner.RefreshClaudeAsync(cancellationToken);
             account = TryReadClaudeAccount(credentialsPath);
-            planName = ResolvePlanName(account);
+            planName = ResolvePlanName(account, cachedPlanName);
             var refreshedLocalUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
             now = DateTimeOffset.Now;
 
@@ -130,9 +143,9 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             {
                 _nextCommandRefreshAt = now.Add(CommandSuccessCooldown);
                 _commandRefreshPauseMessage = string.Empty;
-                if (RememberLivePlanName(account?.PlanName ?? string.Empty))
+                if (RememberLivePlanName(account?.PlanName ?? string.Empty, profileCachePath, ref cachedPlanName))
                 {
-                    planName = ResolvePlanName(account);
+                    planName = ResolvePlanName(account, cachedPlanName);
                     refreshedLocalUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
                 }
 
@@ -208,14 +221,19 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             planName);
     }
 
-    private string ResolvePlanName(ClaudeAccount? account)
+    private string ResolvePlanName(ClaudeAccount? account, string cachedPlanName)
     {
-        return string.IsNullOrWhiteSpace(_livePlanName)
+        if (!string.IsNullOrWhiteSpace(_livePlanName))
+        {
+            return _livePlanName;
+        }
+
+        return string.IsNullOrWhiteSpace(cachedPlanName)
             ? account?.PlanName ?? string.Empty
-            : _livePlanName;
+            : cachedPlanName;
     }
 
-    private bool RememberLivePlanName(string livePlanName)
+    private bool RememberLivePlanName(string livePlanName, string profileCachePath, ref string cachedPlanName)
     {
         if (string.IsNullOrWhiteSpace(livePlanName) ||
             string.Equals(_livePlanName, livePlanName, StringComparison.OrdinalIgnoreCase))
@@ -224,7 +242,52 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         }
 
         _livePlanName = livePlanName;
+        cachedPlanName = livePlanName;
+        TryWriteCachedPlanName(profileCachePath, livePlanName);
         return true;
+    }
+
+    private static string TryReadCachedPlanName(string profileCachePath)
+    {
+        try
+        {
+            if (!File.Exists(profileCachePath))
+            {
+                return string.Empty;
+            }
+
+            var cache = JsonSerializer.Deserialize<ClaudeProfileCache>(
+                File.ReadAllText(profileCachePath),
+                ProfileCacheJsonOptions);
+
+            return cache?.PlanName?.Trim() ?? string.Empty;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static void TryWriteCachedPlanName(string profileCachePath, string planName)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(planName))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(profileCachePath) ?? ".");
+            var cache = new ClaudeProfileCache
+            {
+                PlanName = planName,
+                CachedAt = DateTimeOffset.Now
+            };
+            File.WriteAllText(profileCachePath, JsonSerializer.Serialize(cache, ProfileCacheJsonOptions));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private static LocalUsageReadResult TryReadLocalUsage(
@@ -464,6 +527,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     private async Task<OAuthUsageReadResult> TryCollectOAuthUsageAsync(
         string claudeDirectory,
         ClaudeAccount? account,
+        string fallbackPlanName,
         CancellationToken cancellationToken)
     {
         var credentialsPath = Path.Combine(claudeDirectory, ".credentials.json");
@@ -490,19 +554,19 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
-                "Anthropic",
-                "Claude OAuth usage endpoint timed out. Local status-line export will be used if it is fresh.",
-                credentialsPath,
-                account?.PlanName ?? string.Empty));
+                return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
+                    "Anthropic",
+                    "Claude OAuth usage endpoint timed out. Local status-line export will be used if it is fresh.",
+                    credentialsPath,
+                    fallbackPlanName));
         }
         catch (HttpRequestException ex)
         {
-            return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
-                "Anthropic",
-                $"Claude OAuth usage endpoint failed: {ex.Message}",
-                credentialsPath,
-                account?.PlanName ?? string.Empty));
+                return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
+                    "Anthropic",
+                    $"Claude OAuth usage endpoint failed: {ex.Message}",
+                    credentialsPath,
+                    fallbackPlanName));
         }
 
         using (response)
@@ -513,7 +577,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                     "Anthropic",
                     "Claude OAuth usage endpoint rejected the cached Claude Code credentials. Local status-line export is preferred; start Claude Code once if no status export exists yet.",
                     credentialsPath,
-                    account?.PlanName ?? string.Empty));
+                    fallbackPlanName));
             }
 
             if (response.StatusCode is System.Net.HttpStatusCode.TooManyRequests)
@@ -522,7 +586,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                     "Anthropic",
                     "Claude live usage endpoint is temporarily rate-limited. Local status-line export will be used if available.",
                     credentialsPath,
-                    account?.PlanName ?? string.Empty));
+                    fallbackPlanName));
             }
 
             if (!response.IsSuccessStatusCode)
@@ -531,7 +595,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                     "Anthropic",
                     $"Claude OAuth usage endpoint returned {FormatStatusCode(response)}. Local status-line export will be used if it is fresh.",
                     credentialsPath,
-                    account?.PlanName ?? string.Empty));
+                    fallbackPlanName));
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -554,7 +618,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                     "Anthropic",
                     $"Claude OAuth usage endpoint returned an unexpected response shape: {ex.Message}. Local status-line export will be used if it is fresh.",
                     credentialsPath,
-                    account?.PlanName ?? string.Empty));
+                    fallbackPlanName));
             }
 
             if (windows.Count == 0)
@@ -565,7 +629,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             }
 
             var planName = string.IsNullOrWhiteSpace(livePlanName)
-                ? ResolvePlanName(account)
+                ? fallbackPlanName
                 : livePlanName;
 
             return OAuthUsageReadResult.Available(new ProviderUsage
@@ -1032,6 +1096,13 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     }
 
     private sealed record ClaudeAccount(string? AccessToken, string PlanName);
+
+    private sealed class ClaudeProfileCache
+    {
+        public string PlanName { get; init; } = string.Empty;
+
+        public DateTimeOffset CachedAt { get; init; }
+    }
 
     private enum StaleLocalExportReason
     {

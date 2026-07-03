@@ -54,6 +54,37 @@ public sealed class ClaudeStatusFileUsageCollectorTests
     }
 
     [TestMethod]
+    public async Task ManualRefreshCachesLivePlanTierForNextStartup()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        WriteClaudeCredentialsAndStatusExport(
+            homeDirectory,
+            DateTimeOffset.Now,
+            subscriptionType: "max",
+            rateLimitTier: "max_5x");
+        var handler = new QueueHttpMessageHandler(
+            (HttpStatusCode.OK, BuildOAuthProfileResponse("default_claude_max_20x")),
+            (HttpStatusCode.OK, BuildOAuthUsageResponse(DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6))));
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var refreshedUsage = await collector.CollectAsync(forceRefresh: true, CancellationToken.None);
+
+        Assert.AreEqual("Max 20x", refreshedUsage.PlanName);
+
+        var restartHandler = new StubHttpMessageHandler(HttpStatusCode.TooManyRequests);
+        using var restartHttpClient = new HttpClient(restartHandler);
+        var restartedCollector = new ClaudeStatusFileUsageCollector(homeDirectory, restartHttpClient);
+
+        var startupUsage = await restartedCollector.CollectAsync(CancellationToken.None);
+
+        Assert.IsFalse(startupUsage.IsUnavailable);
+        Assert.AreEqual("Max 20x", startupUsage.PlanName);
+        StringAssert.Contains(startupUsage.StatusMessage, "local status output");
+        Assert.AreEqual(0, restartHandler.CallCount);
+    }
+
+    [TestMethod]
     public async Task OAuthRateLimitWithStaleLocalStatusExportReportsUnavailableWithoutWindows()
     {
         var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
