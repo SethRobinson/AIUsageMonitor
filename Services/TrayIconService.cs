@@ -503,7 +503,9 @@ public sealed class TrayIconService : IDisposable
             }
 
             _viewModel.SetChecking(_usageAggregatorService.ProviderNames);
-            await foreach (var provider in _usageAggregatorService.CollectIncrementalAsync(refreshCts.Token))
+            await foreach (var provider in _usageAggregatorService.CollectIncrementalAsync(
+                forceRefresh: force,
+                cancellationToken: refreshCts.Token))
             {
                 if (_disposed)
                 {

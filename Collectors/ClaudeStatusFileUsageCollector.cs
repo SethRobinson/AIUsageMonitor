@@ -7,7 +7,7 @@ using AIUsageMonitor.Models;
 
 namespace AIUsageMonitor.Collectors;
 
-public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
+public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageCollector
 {
     private const string ExportName = "ai-usage-monitor-usage.json";
     private const string LegacyExportName = "apimonitor-usage.json";
@@ -23,6 +23,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
     private string _commandRefreshPauseMessage = string.Empty;
     private DateTimeOffset _nextOAuthUsageAt = DateTimeOffset.MinValue;
     private string _oauthUsagePauseMessage = string.Empty;
+    private string _livePlanName = string.Empty;
 
     private static readonly HttpClient SharedHttpClient = new()
     {
@@ -41,11 +42,16 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
     public async Task<ProviderUsage> CollectAsync(CancellationToken cancellationToken)
     {
+        return await CollectAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ProviderUsage> CollectAsync(bool forceRefresh, CancellationToken cancellationToken)
+    {
         var home = _homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var claudeDirectory = Path.Combine(home, ".claude");
         var credentialsPath = Path.Combine(claudeDirectory, ".credentials.json");
         var account = TryReadClaudeAccount(credentialsPath);
-        var planName = account?.PlanName ?? string.Empty;
+        var planName = ResolvePlanName(account);
         var candidatePaths = new[]
         {
             Path.Combine(claudeDirectory, ExportName),
@@ -54,16 +60,21 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             Path.Combine(claudeDirectory, "usage-status.md")
         };
 
+        if (forceRefresh && RememberLivePlanName(await TryCollectOAuthProfilePlanNameAsync(claudeDirectory, account, cancellationToken)))
+        {
+            planName = ResolvePlanName(account);
+        }
+
         var localUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
 
-        if (localUsage.FreshUsage is not null)
+        if (localUsage.FreshUsage is not null && !forceRefresh)
         {
             return localUsage.FreshUsage;
         }
 
         var statusNotes = new List<string>();
         var now = DateTimeOffset.Now;
-        var oauthPaused = _nextOAuthUsageAt > now;
+        var oauthPaused = !forceRefresh && _nextOAuthUsageAt > now;
         var oauthUsage = OAuthUsageReadResult.None;
 
         if (oauthPaused)
@@ -73,9 +84,20 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         else
         {
             oauthUsage = await TryCollectOAuthUsageAsync(claudeDirectory, account, cancellationToken);
+            if (RememberLivePlanName(oauthUsage.LivePlanName))
+            {
+                planName = ResolvePlanName(account);
+                localUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
+            }
+
             if (oauthUsage.Usage is not null && !oauthUsage.Usage.IsUnavailable)
             {
-                return oauthUsage.Usage;
+                if (!forceRefresh ||
+                    !string.IsNullOrWhiteSpace(oauthUsage.LivePlanName) ||
+                    !string.IsNullOrWhiteSpace(_livePlanName))
+                {
+                    return oauthUsage.Usage;
+                }
             }
 
             if (oauthUsage.IsRateLimited)
@@ -87,9 +109,20 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             }
         }
 
-        if (_nextCommandRefreshAt <= now && !oauthPaused && !oauthUsage.IsRateLimited)
+        if (forceRefresh &&
+            !string.IsNullOrWhiteSpace(oauthUsage.LivePlanName) &&
+            localUsage.FreshUsage is not null)
+        {
+            return WithStatusNote(localUsage.FreshUsage, "Plan checked from Claude OAuth usage endpoint.");
+        }
+
+        if ((forceRefresh || _nextCommandRefreshAt <= now) &&
+            (!oauthPaused || forceRefresh) &&
+            (!oauthUsage.IsRateLimited || forceRefresh))
         {
             var refreshResult = await CliQuotaRefreshRunner.RefreshClaudeAsync(cancellationToken);
+            account = TryReadClaudeAccount(credentialsPath);
+            planName = ResolvePlanName(account);
             var refreshedLocalUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
             now = DateTimeOffset.Now;
 
@@ -97,6 +130,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             {
                 _nextCommandRefreshAt = now.Add(CommandSuccessCooldown);
                 _commandRefreshPauseMessage = string.Empty;
+                if (RememberLivePlanName(account?.PlanName ?? string.Empty))
+                {
+                    planName = ResolvePlanName(account);
+                    refreshedLocalUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
+                }
 
                 if (refreshedLocalUsage.FreshUsage is not null)
                 {
@@ -119,6 +157,16 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         else if (!string.IsNullOrWhiteSpace(_commandRefreshPauseMessage))
         {
             AddStatusNote(statusNotes, $"{_commandRefreshPauseMessage} Next command retry after {_nextCommandRefreshAt.ToLocalTime():h:mm tt}.");
+        }
+
+        if (localUsage.FreshUsage is not null)
+        {
+            return WithStatusNote(localUsage.FreshUsage, string.Join(" ", statusNotes));
+        }
+
+        if (oauthUsage.Usage is not null && !oauthUsage.Usage.IsUnavailable)
+        {
+            return WithStatusNote(oauthUsage.Usage, string.Join(" ", statusNotes));
         }
 
         if (localUsage.StaleExport is not null)
@@ -158,6 +206,25 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
             message,
             claudeDirectory,
             planName);
+    }
+
+    private string ResolvePlanName(ClaudeAccount? account)
+    {
+        return string.IsNullOrWhiteSpace(_livePlanName)
+            ? account?.PlanName ?? string.Empty
+            : _livePlanName;
+    }
+
+    private bool RememberLivePlanName(string livePlanName)
+    {
+        if (string.IsNullOrWhiteSpace(livePlanName) ||
+            string.Equals(_livePlanName, livePlanName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        _livePlanName = livePlanName;
+        return true;
     }
 
     private static LocalUsageReadResult TryReadLocalUsage(
@@ -342,6 +409,58 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         };
     }
 
+    private async Task<string> TryCollectOAuthProfilePlanNameAsync(
+        string claudeDirectory,
+        ClaudeAccount? account,
+        CancellationToken cancellationToken)
+    {
+        var credentialsPath = Path.Combine(claudeDirectory, ".credentials.json");
+        if (!File.Exists(credentialsPath))
+        {
+            return string.Empty;
+        }
+
+        account ??= TryReadClaudeAccount(credentialsPath);
+        var accessToken = account?.AccessToken;
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return string.Empty;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com/api/oauth/profile");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.SendAsync(request, cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return string.Empty;
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                return string.Empty;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            try
+            {
+                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+                return TryGetClaudePlanName(document.RootElement);
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+            {
+                return string.Empty;
+            }
+        }
+    }
+
     private async Task<OAuthUsageReadResult> TryCollectOAuthUsageAsync(
         string claudeDirectory,
         ClaudeAccount? account,
@@ -417,10 +536,12 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             var windows = new List<UsageWindow>();
+            var livePlanName = string.Empty;
             try
             {
                 using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
                 var root = document.RootElement;
+                livePlanName = TryGetClaudePlanName(root);
 
                 AddOAuthLimitWindows(windows, root);
                 AddOAuthWindowIfMissing(windows, root, "five_hour", "5h");
@@ -438,19 +559,25 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
             if (windows.Count == 0)
             {
-                return OAuthUsageReadResult.None;
+                return string.IsNullOrWhiteSpace(livePlanName)
+                    ? OAuthUsageReadResult.None
+                    : OAuthUsageReadResult.PlanOnly(livePlanName);
             }
+
+            var planName = string.IsNullOrWhiteSpace(livePlanName)
+                ? ResolvePlanName(account)
+                : livePlanName;
 
             return OAuthUsageReadResult.Available(new ProviderUsage
             {
                 Name = "Anthropic",
-                PlanName = account?.PlanName ?? string.Empty,
+                PlanName = planName,
                 Source = "Claude OAuth usage endpoint",
-                StatusMessage = string.IsNullOrWhiteSpace(account?.PlanName)
+                StatusMessage = string.IsNullOrWhiteSpace(planName)
                     ? "Claude quota from local Claude Code OAuth credentials."
-                    : $"Claude {account.PlanName} quota from local Claude Code OAuth credentials.",
+                    : $"Claude {planName} quota from local Claude Code OAuth credentials.",
                 Windows = windows
-            });
+            }, livePlanName);
         }
     }
 
@@ -473,9 +600,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
                 return null;
             }
 
-            var subscriptionType = TryFindStringProperty(root, "subscriptionType");
-            var rateLimitTier = TryFindStringProperty(root, "rateLimitTier");
-            var planName = PlanNameFormatter.FormatClaude(subscriptionType, rateLimitTier);
+            var planName = TryGetClaudePlanName(root);
 
             if (root.TryGetProperty("claudeAiOauth", out var oauth) &&
                 oauth.ValueKind == JsonValueKind.Object &&
@@ -697,8 +822,34 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
 
     private static string TryGetClaudePlanName(JsonElement root, string fallbackPlanName)
     {
-        var subscriptionType = TryFindStringProperty(root, "subscriptionType");
-        var rateLimitTier = TryFindStringProperty(root, "rateLimitTier");
+        var planName = TryGetClaudePlanName(root);
+        if (!string.IsNullOrWhiteSpace(planName))
+        {
+            return planName;
+        }
+
+        return fallbackPlanName;
+    }
+
+    private static string TryGetClaudePlanName(JsonElement root)
+    {
+        var subscriptionType = TryFindFirstStringProperty(root, "subscriptionType", "subscription_type");
+        if (string.IsNullOrWhiteSpace(subscriptionType))
+        {
+            var organizationType = TryFindStringProperty(root, "organization_type");
+            if (organizationType?.Contains("claude_max", StringComparison.OrdinalIgnoreCase) == true ||
+                TryFindBooleanProperty(root, "has_claude_max") == true)
+            {
+                subscriptionType = "max";
+            }
+            else if (organizationType?.Contains("claude_pro", StringComparison.OrdinalIgnoreCase) == true ||
+                TryFindBooleanProperty(root, "has_claude_pro") == true)
+            {
+                subscriptionType = "pro";
+            }
+        }
+
+        var rateLimitTier = TryFindFirstStringProperty(root, "rateLimitTier", "rate_limit_tier");
         var planName = PlanNameFormatter.FormatClaude(subscriptionType, rateLimitTier);
         if (!string.IsNullOrWhiteSpace(planName))
         {
@@ -706,10 +857,22 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         }
 
         return PlanNameFormatter.Format(
-            TryFindStringProperty(root, "planName") ??
-            TryFindStringProperty(root, "plan")) is { Length: > 0 } formatted
-                ? formatted
-                : fallbackPlanName;
+            TryFindFirstStringProperty(root, "planName", "plan_name") ??
+            TryFindStringProperty(root, "plan"));
+    }
+
+    private static string? TryFindFirstStringProperty(JsonElement element, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var value = TryFindStringProperty(element, propertyName);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static string? TryFindStringProperty(JsonElement element, string propertyName)
@@ -738,6 +901,44 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
                 {
                     var nested = TryFindStringProperty(item, propertyName);
                     if (!string.IsNullOrWhiteSpace(nested))
+                    {
+                        return nested;
+                    }
+                }
+
+                break;
+        }
+
+        return null;
+    }
+
+    private static bool? TryFindBooleanProperty(JsonElement element, string propertyName)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (property.NameEquals(propertyName) &&
+                        property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    {
+                        return property.Value.GetBoolean();
+                    }
+
+                    var nested = TryFindBooleanProperty(property.Value, propertyName);
+                    if (nested is not null)
+                    {
+                        return nested;
+                    }
+                }
+
+                break;
+
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    var nested = TryFindBooleanProperty(item, propertyName);
+                    if (nested is not null)
                     {
                         return nested;
                     }
@@ -813,15 +1014,21 @@ public sealed partial class ClaudeStatusFileUsageCollector : IUsageCollector
         ProviderUsage? StaleUsage,
         StaleLocalExport? StaleExport);
 
-    private sealed record OAuthUsageReadResult(ProviderUsage? Usage, bool IsRateLimited)
+    private sealed record OAuthUsageReadResult(ProviderUsage? Usage, bool IsRateLimited, string LivePlanName)
     {
-        public static readonly OAuthUsageReadResult None = new(null, false);
+        public static readonly OAuthUsageReadResult None = new(null, false, string.Empty);
 
-        public static OAuthUsageReadResult Available(ProviderUsage usage) => new(usage, false);
+        public static OAuthUsageReadResult Available(ProviderUsage usage, string livePlanName = "") =>
+            new(usage, false, livePlanName);
 
-        public static OAuthUsageReadResult Unavailable(ProviderUsage usage) => new(usage, false);
+        public static OAuthUsageReadResult Unavailable(ProviderUsage usage) =>
+            new(usage, false, string.Empty);
 
-        public static OAuthUsageReadResult RateLimited(ProviderUsage usage) => new(usage, true);
+        public static OAuthUsageReadResult RateLimited(ProviderUsage usage) =>
+            new(usage, true, string.Empty);
+
+        public static OAuthUsageReadResult PlanOnly(string livePlanName) =>
+            new(null, false, livePlanName);
     }
 
     private sealed record ClaudeAccount(string? AccessToken, string PlanName);

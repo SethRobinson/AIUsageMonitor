@@ -76,6 +76,18 @@ public sealed class RefreshAggregationTests
     }
 
     [TestMethod]
+    public async Task ForceRefreshIsPassedToAwareCollectors()
+    {
+        var forceAware = new ForceAwareUsageCollector("Aware");
+        var aggregator = CreateAggregator(forceAware);
+
+        _ = await CollectResultsAsync(aggregator);
+        _ = await CollectResultsAsync(aggregator, forceRefresh: true);
+
+        CollectionAssert.AreEqual(new[] { false, true }, forceAware.ForceRefreshValues);
+    }
+
+    [TestMethod]
     public async Task CancellationStopsPendingCollectorsWithoutDiscardingCompletedResults()
     {
         var fast = ScriptedUsageCollector.Success("Fast", TimeSpan.FromMilliseconds(100), 10);
@@ -145,7 +157,7 @@ public sealed class RefreshAggregationTests
         Assert.AreEqual("Blocking", enumerator.Current.Name);
     }
 
-    private static UsageAggregatorService CreateAggregator(params ScriptedUsageCollector[] collectors)
+    private static UsageAggregatorService CreateAggregator(params IUsageCollector[] collectors)
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
@@ -162,15 +174,16 @@ public sealed class RefreshAggregationTests
         return new UsageAggregatorService(
             new AppLogService(tempDirectory),
             settingsService,
-            collectors.Cast<IUsageCollector>().ToList());
+            collectors.ToList());
     }
 
     private static async Task<List<ProviderUsage>> CollectResultsAsync(
         UsageAggregatorService aggregator,
+        bool forceRefresh = false,
         CancellationToken cancellationToken = default)
     {
         var results = new List<ProviderUsage>();
-        await foreach (var provider in aggregator.CollectIncrementalAsync(cancellationToken))
+        await foreach (var provider in aggregator.CollectIncrementalAsync(forceRefresh, cancellationToken))
         {
             results.Add(provider);
         }
@@ -265,6 +278,26 @@ public sealed class RefreshAggregationTests
             }
 
             return BuildUsage(ProviderName, _usedPercent);
+        }
+    }
+
+    private sealed class ForceAwareUsageCollector(string providerName) : IForceRefreshUsageCollector
+    {
+        private readonly List<bool> _forceRefreshValues = [];
+
+        public string ProviderName { get; } = providerName;
+
+        public bool[] ForceRefreshValues => _forceRefreshValues.ToArray();
+
+        public Task<ProviderUsage> CollectAsync(CancellationToken cancellationToken)
+        {
+            return CollectAsync(forceRefresh: false, cancellationToken);
+        }
+
+        public Task<ProviderUsage> CollectAsync(bool forceRefresh, CancellationToken cancellationToken)
+        {
+            _forceRefreshValues.Add(forceRefresh);
+            return Task.FromResult(BuildUsage(ProviderName, 10));
         }
     }
 }

@@ -117,6 +117,17 @@ function Get-Prop($obj, $name) {
     return $prop.Value
 }
 
+function Get-FirstProp($obj, [string[]]$names) {
+    foreach ($name in $names) {
+        $value = Get-Prop $obj $name
+        if ($null -ne $value) {
+            return $value
+        }
+    }
+
+    return $null
+}
+
 function Format-Left($label, $window) {
     if ($null -eq $window) {
         return $null
@@ -138,6 +149,12 @@ function Format-Left($label, $window) {
 try {
     $data = $inputJson | ConvertFrom-Json
     $rateLimits = Get-Prop $data 'rate_limits'
+    $subscriptionType = Get-FirstProp $data @('subscriptionType', 'subscription_type')
+    $rateLimitTier = Get-FirstProp $data @('rateLimitTier', 'rate_limit_tier')
+    if ($null -eq $rateLimitTier) {
+        $rateLimitTier = Get-FirstProp $rateLimits @('rateLimitTier', 'rate_limit_tier')
+    }
+
     $model = Get-Prop (Get-Prop $data 'model') 'display_name'
     if ([string]::IsNullOrWhiteSpace($model)) {
         $model = 'Claude'
@@ -156,6 +173,8 @@ try {
         status = $status
         statusMessage = $message
         model = $model
+        subscriptionType = $subscriptionType
+        rateLimitTier = $rateLimitTier
         session_id = Get-Prop $data 'session_id'
         rate_limits = $rateLimits
     }

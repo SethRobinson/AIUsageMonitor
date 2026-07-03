@@ -47,10 +47,15 @@ public sealed class UsageAggregatorService
 
     public async Task<UsageSnapshot> CollectAsync(CancellationToken cancellationToken = default)
     {
+        return await CollectAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<UsageSnapshot> CollectAsync(bool forceRefresh, CancellationToken cancellationToken = default)
+    {
         var providerNames = ProviderNames;
         var providersByName = new ConcurrentDictionary<string, ProviderUsage>(StringComparer.OrdinalIgnoreCase);
 
-        await foreach (var provider in CollectIncrementalAsync(cancellationToken).ConfigureAwait(false))
+        await foreach (var provider in CollectIncrementalAsync(forceRefresh, cancellationToken).ConfigureAwait(false))
         {
             providersByName[provider.Name] = provider;
         }
@@ -78,6 +83,16 @@ public sealed class UsageAggregatorService
     public async IAsyncEnumerable<ProviderUsage> CollectIncrementalAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        await foreach (var provider in CollectIncrementalAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false))
+        {
+            yield return provider;
+        }
+    }
+
+    public async IAsyncEnumerable<ProviderUsage> CollectIncrementalAsync(
+        bool forceRefresh,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
         cancellationToken.ThrowIfCancellationRequested();
 
         var settings = _settingsService.Load();
@@ -86,7 +101,7 @@ public sealed class UsageAggregatorService
 
         var pendingTasks = enabledCollectors
             .Select(collector => Task.Run(
-                () => CollectProviderAsync(collector, cancellationToken),
+                () => CollectProviderAsync(collector, forceRefresh, cancellationToken),
                 CancellationToken.None))
             .ToList();
         var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
@@ -132,7 +147,10 @@ public sealed class UsageAggregatorService
         }
     }
 
-    private async Task<ProviderUsage> CollectProviderAsync(IUsageCollector collector, CancellationToken cancellationToken)
+    private async Task<ProviderUsage> CollectProviderAsync(
+        IUsageCollector collector,
+        bool forceRefresh,
+        CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.Now;
         if (TryCreateBackoffProvider(collector.ProviderName, now, out var backoffProvider))
@@ -142,7 +160,9 @@ public sealed class UsageAggregatorService
 
         try
         {
-            var provider = await collector.CollectAsync(cancellationToken).ConfigureAwait(false);
+            var provider = collector is IForceRefreshUsageCollector forceRefreshCollector
+                ? await forceRefreshCollector.CollectAsync(forceRefresh, cancellationToken).ConfigureAwait(false)
+                : await collector.CollectAsync(cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
 
             provider.LastCheckedAt = DateTimeOffset.Now;

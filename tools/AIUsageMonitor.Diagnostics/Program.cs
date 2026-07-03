@@ -41,7 +41,8 @@ internal static class DiagnosticsProgram
     private static async Task<int> RunLiveAsync(RefreshOptions options)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(options.TimeoutSeconds));
-        var aggregator = new UsageAggregatorService(new AppLogService(), new AppSettingsService());
+        var settingsService = CreateLiveSettingsService(options);
+        var aggregator = new UsageAggregatorService(new AppLogService(), settingsService);
         var result = await RunRefreshAsync(aggregator, "live", options, cts.Token);
         EmitSummary("live", options, [result], result.Canceled ? 1 : 0);
         return result.Canceled ? 1 : 0;
@@ -95,6 +96,29 @@ internal static class DiagnosticsProgram
         return exitCode;
     }
 
+    private static AppSettingsService CreateLiveSettingsService(RefreshOptions options)
+    {
+        var settingsService = new AppSettingsService();
+        if (string.IsNullOrWhiteSpace(options.Provider))
+        {
+            return settingsService;
+        }
+
+        var tempDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Diagnostics", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        var filteredSettingsService = new AppSettingsService(tempDirectory);
+        var settings = settingsService.Load();
+        foreach (var providerName in KnownProviders.All)
+        {
+            settings.SetProviderEnabled(
+                providerName,
+                string.Equals(providerName, options.Provider, StringComparison.OrdinalIgnoreCase));
+        }
+
+        filteredSettingsService.Save(settings);
+        return filteredSettingsService;
+    }
+
     private static async Task<RefreshRunResult> RunRefreshAsync(
         UsageAggregatorService aggregator,
         string phase,
@@ -110,6 +134,8 @@ internal static class DiagnosticsProgram
         {
             ["phase"] = phase,
             ["scenario"] = options.Scenario,
+            ["provider"] = options.Provider,
+            ["forceRefresh"] = options.ForceRefresh,
             ["providerCount"] = providers.Count
         });
 
@@ -125,10 +151,11 @@ internal static class DiagnosticsProgram
 
         try
         {
-            await foreach (var provider in aggregator.CollectIncrementalAsync(cancellationToken))
+            await foreach (var provider in aggregator.CollectIncrementalAsync(options.ForceRefresh, cancellationToken))
             {
                 var providerResult = new ProviderResultEvent(
                     provider.Name,
+                    provider.PlanName,
                     stopwatch.ElapsedMilliseconds,
                     provider.IsUnavailable,
                     provider.StatusMessage);
@@ -138,6 +165,7 @@ internal static class DiagnosticsProgram
                 {
                     ["phase"] = phase,
                     ["provider"] = providerResult.Provider,
+                    ["planName"] = providerResult.PlanName,
                     ["elapsedMilliseconds"] = providerResult.ElapsedMilliseconds,
                     ["isUnavailable"] = providerResult.IsUnavailable,
                     ["statusMessage"] = providerResult.StatusMessage
@@ -218,6 +246,8 @@ internal static class DiagnosticsProgram
         {
             ["mode"] = mode,
             ["scenario"] = options.Scenario,
+            ["provider"] = options.Provider,
+            ["forceRefresh"] = options.ForceRefresh,
             ["runCount"] = results.Count,
             ["resultCount"] = results.Sum(result => result.ProviderResults.Count),
             ["canceled"] = results.Any(result => result.Canceled),
@@ -241,6 +271,7 @@ internal static class DiagnosticsProgram
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --fake --scenario failure");
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --fake --scenario cancel --cancel-after-ms 500");
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --timeout-seconds 120");
+        Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --provider Anthropic --force-refresh --timeout-seconds 120");
     }
 }
 
@@ -248,6 +279,8 @@ internal sealed record RefreshOptions(
     bool Fake,
     bool Live,
     string Scenario,
+    string Provider,
+    bool ForceRefresh,
     bool AssertIndependent,
     int CancelAfterMilliseconds,
     int TimeoutSeconds)
@@ -257,6 +290,8 @@ internal sealed record RefreshOptions(
         var fake = false;
         var live = false;
         var scenario = "staggered";
+        var provider = string.Empty;
+        var forceRefresh = false;
         var assertIndependent = false;
         var cancelAfterMilliseconds = 500;
         var timeoutSeconds = 120;
@@ -273,6 +308,12 @@ internal sealed record RefreshOptions(
                     break;
                 case "--scenario" when index + 1 < args.Length:
                     scenario = args[++index];
+                    break;
+                case "--provider" when index + 1 < args.Length:
+                    provider = args[++index];
+                    break;
+                case "--force-refresh":
+                    forceRefresh = true;
                     break;
                 case "--assert-independent":
                     assertIndependent = true;
@@ -293,12 +334,13 @@ internal sealed record RefreshOptions(
             fake = true;
         }
 
-        return new RefreshOptions(fake, live, scenario, assertIndependent, cancelAfterMilliseconds, timeoutSeconds);
+        return new RefreshOptions(fake, live, scenario, provider, forceRefresh, assertIndependent, cancelAfterMilliseconds, timeoutSeconds);
     }
 }
 
 internal sealed record ProviderResultEvent(
     string Provider,
+    string PlanName,
     long ElapsedMilliseconds,
     bool IsUnavailable,
     string StatusMessage);

@@ -8,3 +8,8 @@ public interface IUsageCollector
 
     Task<ProviderUsage> CollectAsync(CancellationToken cancellationToken);
 }
+
+public interface IForceRefreshUsageCollector : IUsageCollector
+{
+    Task<ProviderUsage> CollectAsync(bool forceRefresh, CancellationToken cancellationToken);
+}

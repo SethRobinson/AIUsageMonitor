@@ -10,7 +10,9 @@
   - `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --fake --scenario staggered --assert-independent`
   - `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --fake --scenario failure`
   - `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --fake --scenario cancel --cancel-after-ms 500`
+- Diagnostics `provider-result` events include `planName`; pass `--force-refresh` to exercise the same collector path used by the manual tray refresh button, and `--provider ProviderName` to run one live provider.
 - Optional live diagnostics are opt-in only: `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --live --timeout-seconds 120`.
+  - Manual Anthropic refresh live check: `dotnet run --project .\tools\AIUsageMonitor.Diagnostics -- refresh --live --provider Anthropic --force-refresh --timeout-seconds 120`.
 - README screenshots are generated from `usage.fake.json` with the app's built-in screenshot mode, which forces 100% UI scale and rebases fake reset times relative to the capture time. Regenerate them with:
   - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot .\docs\screenshot-full.png --screenshot-size 1440x740`
   - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot .\docs\screenshot-compact.png --screenshot-size 1440x136`
