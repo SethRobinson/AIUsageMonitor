@@ -1,25 +1,39 @@
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AIUsageMonitor.Models;
 using AIUsageMonitor.Services;
+using Microsoft.Data.Sqlite;
 
 namespace AIUsageMonitor.Collectors;
 
 public sealed class CursorUsageCollector : IUsageCollector
 {
     private readonly AppSettingsService _settingsService;
+    private readonly HttpClient _httpClient;
+    private readonly ICursorDesktopAuthSource _desktopAuthSource;
 
-    private static readonly HttpClient HttpClient = new()
+    private static readonly HttpClient SharedHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(20)
     };
 
-    public CursorUsageCollector(AppSettingsService settingsService)
+    public CursorUsageCollector(AppSettingsService settingsService, HttpClient? httpClient = null)
+        : this(settingsService, httpClient, CursorDesktopStateAuthSource.Instance)
+    {
+    }
+
+    internal CursorUsageCollector(
+        AppSettingsService settingsService,
+        HttpClient? httpClient,
+        ICursorDesktopAuthSource desktopAuthSource)
     {
         _settingsService = settingsService;
+        _httpClient = httpClient ?? SharedHttpClient;
+        _desktopAuthSource = desktopAuthSource;
     }
 
     public string ProviderName => KnownProviders.Cursor;
@@ -33,10 +47,16 @@ public sealed class CursorUsageCollector : IUsageCollector
             : await CollectPersonalDashboardUsageAsync(settings, cancellationToken);
     }
 
-    private static async Task<ProviderUsage> CollectPersonalDashboardUsageAsync(
+    private async Task<ProviderUsage> CollectPersonalDashboardUsageAsync(
         AppSettings settings,
         CancellationToken cancellationToken)
     {
+        var desktopUsage = await TryCollectDesktopUsageAsync(cancellationToken);
+        if (desktopUsage is not null)
+        {
+            return desktopUsage;
+        }
+
         var dashboardUsage = await TryCollectDashboardUsageAsync(settings, cancellationToken);
         if (dashboardUsage is not null)
         {
@@ -77,7 +97,7 @@ public sealed class CursorUsageCollector : IUsageCollector
             Convert.ToBase64String(Encoding.UTF8.GetBytes($"{apiKey}:")));
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
 
-        using var response = await HttpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -119,7 +139,7 @@ public sealed class CursorUsageCollector : IUsageCollector
         };
     }
 
-    private static async Task<ProviderUsage?> TryCollectDashboardUsageAsync(AppSettings settings, CancellationToken cancellationToken)
+    private async Task<ProviderUsage?> TryCollectDashboardUsageAsync(AppSettings settings, CancellationToken cancellationToken)
     {
         string cookieHeader;
 
@@ -140,21 +160,150 @@ public sealed class CursorUsageCollector : IUsageCollector
             return null;
         }
 
-        using var request = BuildDashboardRequest(HttpMethod.Get, "https://cursor.com/api/usage-summary", cookieHeader);
-        using var response = await HttpClient.SendAsync(request, cancellationToken);
+        ProviderUsage? zeroLimitUsage = null;
 
-        if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized)
+        using (var currentPeriodRequest = BuildDashboardRequest(
+                   HttpMethod.Get,
+                   "https://cursor.com/api/dashboard/get-current-period-usage",
+                   cookieHeader))
+        using (var currentPeriodResponse = await _httpClient.SendAsync(currentPeriodRequest, cancellationToken))
         {
-            return ProviderUsageFactory.Unavailable(
-                "Cursor",
-                "Saved Cursor dashboard login was rejected. Open Settings, then use Cursor Setup again.",
-                "Cursor dashboard");
+            var authFailure = BuildAuthFailureUsage(currentPeriodResponse);
+            if (authFailure is not null)
+            {
+                return authFailure;
+            }
+
+            if (currentPeriodResponse.IsSuccessStatusCode)
+            {
+                await using var currentPeriodStream = await currentPeriodResponse.Content.ReadAsStreamAsync(cancellationToken);
+                using var currentPeriodDocument = await JsonDocument.ParseAsync(currentPeriodStream, cancellationToken: cancellationToken);
+                var currentPeriodUsage = ParseCurrentPeriodUsage(currentPeriodDocument.RootElement);
+                if (currentPeriodUsage is not null)
+                {
+                    return currentPeriodUsage;
+                }
+
+                zeroLimitUsage = currentPeriodUsage;
+            }
+        }
+
+        using var request = BuildDashboardRequest(HttpMethod.Get, "https://cursor.com/api/usage-summary", cookieHeader);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+
+        var dashboardAuthFailure = BuildAuthFailureUsage(response);
+        if (dashboardAuthFailure is not null)
+        {
+            return dashboardAuthFailure;
         }
 
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        return ParseDashboardUsage(document.RootElement);
+        var dashboardUsage = ParseDashboardUsage(document.RootElement);
+        if (dashboardUsage.IsUnavailable)
+        {
+            return dashboardUsage.StatusMessage.Contains("Free or zero-limit", StringComparison.OrdinalIgnoreCase)
+                ? dashboardUsage
+                : zeroLimitUsage ?? dashboardUsage;
+        }
+
+        return dashboardUsage.Windows.Count > 0
+            ? dashboardUsage
+            : zeroLimitUsage;
+    }
+
+    private async Task<ProviderUsage?> TryCollectDesktopUsageAsync(CancellationToken cancellationToken)
+    {
+        var auth = _desktopAuthSource.TryLoad();
+        if (auth is null)
+        {
+            return null;
+        }
+
+        var profile = await TryCollectDesktopProfileAsync(auth, cancellationToken);
+        using var request = BuildDesktopRequest(
+            HttpMethod.Post,
+            new Uri(new Uri(auth.BackendUrl), "/aiserver.v1.DashboardService/GetCurrentPeriodUsage"),
+            auth.AccessToken);
+        request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+        try
+        {
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized)
+            {
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            return ParseCurrentPeriodUsage(
+                document.RootElement,
+                "Cursor desktop app",
+                BuildDesktopPlanName(profile, auth),
+                BuildDesktopStatusMessage(profile, auth));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<CursorDesktopProfile?> TryCollectDesktopProfileAsync(
+        CursorDesktopAuth auth,
+        CancellationToken cancellationToken)
+    {
+        using var request = BuildDesktopRequest(
+            HttpMethod.Get,
+            new Uri(new Uri(auth.BackendUrl), "/auth/full_stripe_profile"),
+            auth.AccessToken);
+
+        try
+        {
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var root = document.RootElement;
+            return new CursorDesktopProfile(
+                TryGetString(root, "membershipType"),
+                TryGetString(root, "subscriptionStatus"),
+                TryGetBool(root, "isOnBillableAuto"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static HttpRequestMessage BuildDesktopRequest(HttpMethod method, Uri uri, string accessToken)
+    {
+        var request = new HttpRequestMessage(method, uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+        request.Headers.TryAddWithoutValidation("User-Agent", "AIUsageMonitor/1.0");
+        request.Headers.TryAddWithoutValidation("x-cursor-client-version", "1.2.2");
+        return request;
+    }
+
+    private static ProviderUsage? BuildAuthFailureUsage(HttpResponseMessage response)
+    {
+        return response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized
+            ? ProviderUsageFactory.Unavailable(
+                "Cursor",
+                "Saved Cursor dashboard login was rejected. Open Settings, then use Cursor Setup again.",
+                "Cursor dashboard")
+            : null;
     }
 
     private static HttpRequestMessage BuildDashboardRequest(HttpMethod method, string url, string cookieHeader)
@@ -211,6 +360,15 @@ public sealed class CursorUsageCollector : IUsageCollector
                 $"${onDemandUsedCents / 100d:0.00} used of ${onDemandLimitCents / 100d:0.00}; ${remainingCents / 100d:0.00} left"));
         }
 
+        if (windows.Count == 0 && LooksLikeFreeOrZeroLimitDashboard(root))
+        {
+            return ProviderUsageFactory.Unavailable(
+                "Cursor",
+                "Cursor dashboard login works, but Cursor reports a Free or zero-limit profile for this browser session. Re-save Cursor Setup while signed into the paid profile you use in Cursor.",
+                "Cursor dashboard",
+                PlanNameFormatter.Format(membershipType));
+        }
+
         if (windows.Count == 0)
         {
             return ProviderUsageFactory.Unavailable(
@@ -233,6 +391,95 @@ public sealed class CursorUsageCollector : IUsageCollector
         };
     }
 
+    private static ProviderUsage? ParseCurrentPeriodUsage(
+        JsonElement root,
+        string source = "Cursor dashboard",
+        string planName = "Personal",
+        string statusMessage = "Personal Cursor usage from dashboard current-period API.")
+    {
+        if (!TryGetObject(root, "planUsage", out var planUsage))
+        {
+            return null;
+        }
+
+        var billingCycleEnd = TryGetUnixMilliseconds(root, "billingCycleEnd");
+        var windows = new List<UsageWindow>();
+        AddPercentWindow(
+            windows,
+            planUsage,
+            "totalPercentUsed",
+            "Included usage",
+            billingCycleEnd,
+            TryGetString(root, "displayMessage"));
+        AddPercentWindow(
+            windows,
+            planUsage,
+            "autoPercentUsed",
+            "Auto models",
+            billingCycleEnd,
+            TryGetString(root, "autoModelSelectedDisplayMessage"));
+        AddPercentWindow(
+            windows,
+            planUsage,
+            "apiPercentUsed",
+            "API usage",
+            billingCycleEnd,
+            TryGetString(root, "namedModelSelectedDisplayMessage"));
+
+        if (windows.Count == 0)
+        {
+            return null;
+        }
+
+        return new ProviderUsage
+        {
+            Name = "Cursor",
+            PlanName = planName,
+            Source = source,
+            StatusMessage = statusMessage,
+            Windows = windows
+        };
+    }
+
+    private static void AddPercentWindow(
+        ICollection<UsageWindow> windows,
+        JsonElement element,
+        string propertyName,
+        string title,
+        DateTimeOffset? resetAt,
+        string? detail)
+    {
+        if (!TryGetDouble(element, propertyName, out var usedPercent) ||
+            usedPercent < 0 ||
+            usedPercent > 100)
+        {
+            return;
+        }
+
+        windows.Add(ProviderUsageFactory.PercentWindow(
+            title,
+            usedPercent,
+            resetAt,
+            string.IsNullOrWhiteSpace(detail) ? string.Empty : detail.Trim()));
+    }
+
+    private static bool LooksLikeFreeOrZeroLimitDashboard(JsonElement root)
+    {
+        var membershipType = TryGetString(root, "membershipType");
+        if (!root.TryGetProperty("individualUsage", out var individualUsage) ||
+            !TryGetObject(individualUsage, "plan", out var plan))
+        {
+            return false;
+        }
+
+        var hasLimit = TryGetDouble(plan, "limit", out var limit);
+        var hasRemaining = TryGetDouble(plan, "remaining", out var remaining);
+        var hasUsed = TryGetDouble(plan, "used", out var used);
+        var isFree = string.Equals(membershipType, "free", StringComparison.OrdinalIgnoreCase);
+
+        return isFree && hasLimit && limit <= 0 && (!hasUsed || used <= 0) && (!hasRemaining || remaining <= 0);
+    }
+
     private static bool TryGetDouble(JsonElement element, string propertyName, out double value)
     {
         value = 0;
@@ -249,6 +496,72 @@ public sealed class CursorUsageCollector : IUsageCollector
             JsonValueKind.String => double.TryParse(property.GetString(), out value),
             _ => false
         };
+    }
+
+    private static bool TryGetObject(JsonElement element, string propertyName, out JsonElement property)
+    {
+        return element.TryGetProperty(propertyName, out property) &&
+            property.ValueKind == JsonValueKind.Object;
+    }
+
+    private static string? TryGetString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+    }
+
+    private static bool? TryGetBool(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? property.GetBoolean()
+            : null;
+    }
+
+    private static string BuildDesktopPlanName(CursorDesktopProfile? profile, CursorDesktopAuth auth)
+    {
+        var membershipType = profile?.MembershipType ?? auth.MembershipType;
+        var planName = PlanNameFormatter.Format(membershipType);
+        return string.Equals(planName, "Free", StringComparison.OrdinalIgnoreCase) &&
+               profile?.IsOnBillableAuto == true
+            ? "Billable Auto"
+            : string.IsNullOrWhiteSpace(planName) ? "Personal" : planName;
+    }
+
+    private static string BuildDesktopStatusMessage(CursorDesktopProfile? profile, CursorDesktopAuth auth)
+    {
+        var subscriptionStatus = profile?.SubscriptionStatus ?? auth.SubscriptionStatus;
+        if (profile?.IsOnBillableAuto == true &&
+            !string.IsNullOrWhiteSpace(subscriptionStatus))
+        {
+            return $"Personal Cursor usage from desktop app. Desktop profile reports billable auto with {subscriptionStatus} subscription status.";
+        }
+
+        return "Personal Cursor usage from desktop app current-period API.";
+    }
+
+    private static DateTimeOffset? TryGetUnixMilliseconds(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        try
+        {
+            return property.ValueKind switch
+            {
+                JsonValueKind.Number when property.TryGetInt64(out var value) =>
+                    DateTimeOffset.FromUnixTimeMilliseconds(value),
+                JsonValueKind.String when long.TryParse(property.GetString(), out var value) =>
+                    DateTimeOffset.FromUnixTimeMilliseconds(value),
+                _ => null
+            };
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
     }
 
     private static DateTimeOffset? TryGetDateTimeOffset(JsonElement element, string propertyName)
@@ -277,6 +590,106 @@ public sealed class CursorUsageCollector : IUsageCollector
         catch (ArgumentOutOfRangeException)
         {
             return null;
+        }
+    }
+
+    internal interface ICursorDesktopAuthSource
+    {
+        CursorDesktopAuth? TryLoad();
+    }
+
+    internal sealed record CursorDesktopAuth(
+        string AccessToken,
+        string BackendUrl,
+        string? MembershipType,
+        string? SubscriptionStatus);
+
+    private sealed record CursorDesktopProfile(
+        string? MembershipType,
+        string? SubscriptionStatus,
+        bool? IsOnBillableAuto);
+
+    private sealed class CursorDesktopStateAuthSource : ICursorDesktopAuthSource
+    {
+        public static readonly CursorDesktopStateAuthSource Instance = new();
+
+        private const string AccessTokenKey = "cursorAuth/accessToken";
+        private const string MembershipTypeKey = "cursorAuth/stripeMembershipType";
+        private const string SubscriptionStatusKey = "cursorAuth/stripeSubscriptionStatus";
+        private const string ApplicationUserKey = "src.vs.platform.reactivestorage.browser.reactiveStorageServiceImpl.persistentStorage.applicationUser";
+
+        public CursorDesktopAuth? TryLoad()
+        {
+            var applicationData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (string.IsNullOrWhiteSpace(applicationData))
+            {
+                return null;
+            }
+
+            var databasePath = Path.Combine(applicationData, "Cursor", "User", "globalStorage", "state.vscdb");
+            if (!File.Exists(databasePath))
+            {
+                return null;
+            }
+
+            try
+            {
+                var builder = new SqliteConnectionStringBuilder
+                {
+                    DataSource = databasePath,
+                    Mode = SqliteOpenMode.ReadOnly,
+                    Cache = SqliteCacheMode.Shared
+                };
+
+                using var connection = new SqliteConnection(builder.ToString());
+                connection.Open();
+
+                var accessToken = TryReadValue(connection, AccessTokenKey);
+                if (string.IsNullOrWhiteSpace(accessToken))
+                {
+                    return null;
+                }
+
+                return new CursorDesktopAuth(
+                    accessToken.Trim(),
+                    TryReadBackendUrl(connection) ?? "https://api2.cursor.sh",
+                    TryReadValue(connection, MembershipTypeKey),
+                    TryReadValue(connection, SubscriptionStatusKey));
+            }
+            catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+            {
+                return null;
+            }
+        }
+
+        private static string? TryReadBackendUrl(SqliteConnection connection)
+        {
+            var applicationUser = TryReadValue(connection, ApplicationUserKey);
+            if (string.IsNullOrWhiteSpace(applicationUser))
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(applicationUser);
+            if (!document.RootElement.TryGetProperty("cursorCreds", out var cursorCreds) ||
+                cursorCreds.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var backendUrl = TryGetString(cursorCreds, "backendUrl");
+            return Uri.TryCreate(backendUrl, UriKind.Absolute, out var parsed) &&
+                   parsed.Scheme is "https" or "http"
+                ? parsed.ToString().TrimEnd('/')
+                : null;
+        }
+
+        private static string? TryReadValue(SqliteConnection connection, string key)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT value FROM ItemTable WHERE key = $key LIMIT 1";
+            command.Parameters.AddWithValue("$key", key);
+            return command.ExecuteScalar() as string;
         }
     }
 }

@@ -10,6 +10,8 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
     private bool _isChecking;
     private string _checkedText = string.Empty;
     private readonly string _summaryText;
+    private readonly string _compactSummaryText;
+    private readonly string _miniSummaryText;
 
     public ProviderUsageCard(ProviderUsage usage)
     {
@@ -32,6 +34,7 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         PrimaryRemainingPercent = activeWindows.Count == 0
             ? 0
             : activeWindows.Min(window => window.RemainingPercent);
+        ShowsSummaryProgress = activeWindows.Any(window => !window.IsBalance);
 
         var status = usage.IsUnavailable || activeWindows.Count == 0
             ? UsageStatus.Unavailable
@@ -40,9 +43,19 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         OverallStatusBrush = status.Foreground;
         OverallStatusBackground = status.Background;
         SummaryProgressBrush = status.Foreground;
+        IsBalanceOnly = activeWindows.Count > 0 && activeWindows.All(window => window.IsBalance);
+        BalanceSummaryText = IsBalanceOnly ? activeWindows[0].RemainingText : string.Empty;
         _summaryText = usage.IsUnavailable || activeWindows.Count == 0
             ? $"{ShortName} - {GetUnavailableSummary(usage.StatusMessage)}"
+            : !string.IsNullOrWhiteSpace(BalanceSummaryText)
+            ? $"{ShortName} - {BalanceSummaryText}"
             : $"{ShortName} - {PrimaryRemainingPercent:0}%";
+        _compactSummaryText = usage.IsUnavailable || activeWindows.Count == 0 || string.IsNullOrWhiteSpace(BalanceSummaryText)
+            ? _summaryText
+            : $"{BalanceSummaryText} - {ShortName}";
+        _miniSummaryText = usage.IsUnavailable || activeWindows.Count == 0 || string.IsNullOrWhiteSpace(BalanceSummaryText)
+            ? _summaryText
+            : BalanceSummaryText;
         RefreshCheckedText();
     }
 
@@ -70,6 +83,8 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
             if (SetField(ref _isChecking, value))
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SummaryText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CompactSummaryText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MiniSummaryText)));
             }
         }
     }
@@ -84,7 +99,17 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
 
     public double PrimaryRemainingPercent { get; }
 
+    public bool ShowsSummaryProgress { get; }
+
+    public bool IsBalanceOnly { get; }
+
+    public string BalanceSummaryText { get; }
+
     public string SummaryText => IsChecking ? $"{ShortName} - checking" : _summaryText;
+
+    public string CompactSummaryText => IsChecking ? $"{ShortName} - checking" : _compactSummaryText;
+
+    public string MiniSummaryText => IsChecking ? $"{ShortName} - checking" : _miniSummaryText;
 
     public MediaBrush SummaryProgressBrush { get; }
 

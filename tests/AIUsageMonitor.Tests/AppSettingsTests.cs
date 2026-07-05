@@ -76,6 +76,14 @@ public sealed class AppSettingsTests
     }
 
     [TestMethod]
+    public void AnthropicApiCreditsDefaultsToDisabled()
+    {
+        var settings = new AppSettings();
+
+        Assert.IsFalse(settings.IsProviderEnabled(KnownProviders.AnthropicApiCredits));
+    }
+
+    [TestMethod]
     public void CloneCopiesDiagnosticLoggingEnabled()
     {
         var settings = new AppSettings

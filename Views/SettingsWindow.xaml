@@ -153,6 +153,41 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel>
+                                                <CheckBox x:Name="AnthropicApiCreditsProviderEnabledCheckBox"
+                                                          Content="Anthropic API Credits"
+                                                          Foreground="#D6DAE1"
+                                                          FontSize="13"
+                                                          FontWeight="SemiBold" />
+                                                <TextBlock Margin="24,4,0,0"
+                                                           Text="Saved Anthropic Console billing login for prepaid API credit balance."
+                                                           Foreground="#8B93A1"
+                                                           FontSize="12"
+                                                           TextWrapping="Wrap" />
+                                                <TextBlock x:Name="AnthropicApiCreditsSummaryTextBlock"
+                                                           Margin="24,8,0,0"
+                                                           Foreground="#A8AFBA"
+                                                           FontSize="12"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <Button Grid.Column="1"
+                                                    Width="82"
+                                                    Height="30"
+                                                    Margin="12,0,0,0"
+                                                    VerticalAlignment="Top"
+                                                    Content="Setup"
+                                                    Click="AnthropicApiCreditsSetupButtonOnClick" />
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Padding="12"
+                                            BorderBrush="#2A303A"
+                                            BorderThickness="0,0,0,1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
                                                 <CheckBox x:Name="AntigravityProviderEnabledCheckBox"
                                                           Content="Antigravity"
                                                           Foreground="#D6DAE1"

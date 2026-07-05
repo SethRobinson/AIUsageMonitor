@@ -29,6 +29,16 @@ public sealed class AppSettings
 
     public DateTimeOffset? CursorDashboardCookiesCapturedAt { get; set; }
 
+    public string AnthropicApiCreditsCookieHeaderProtected { get; set; } = string.Empty;
+
+    public DateTimeOffset? AnthropicApiCreditsCookiesCapturedAt { get; set; }
+
+    public string AnthropicApiCreditsOrganizationUuid { get; set; } = string.Empty;
+
+    public string AnthropicApiCreditsOrganizationName { get; set; } = string.Empty;
+
+    public AnthropicApiCreditsBalanceCache? AnthropicApiCreditsLastBalance { get; set; }
+
     public bool ClaudeStatusExporterEnabled { get; set; } = true;
 
     public bool AutoRunAtLoginEnabled { get; set; }
@@ -51,6 +61,11 @@ public sealed class AppSettings
             CursorIncludedBudgetDollars = CursorIncludedBudgetDollars,
             CursorDashboardCookieHeaderProtected = CursorDashboardCookieHeaderProtected,
             CursorDashboardCookiesCapturedAt = CursorDashboardCookiesCapturedAt,
+            AnthropicApiCreditsCookieHeaderProtected = AnthropicApiCreditsCookieHeaderProtected,
+            AnthropicApiCreditsCookiesCapturedAt = AnthropicApiCreditsCookiesCapturedAt,
+            AnthropicApiCreditsOrganizationUuid = AnthropicApiCreditsOrganizationUuid,
+            AnthropicApiCreditsOrganizationName = AnthropicApiCreditsOrganizationName,
+            AnthropicApiCreditsLastBalance = AnthropicApiCreditsLastBalance?.Clone(),
             ClaudeStatusExporterEnabled = ClaudeStatusExporterEnabled,
             AutoRunAtLoginEnabled = AutoRunAtLoginEnabled,
             DiagnosticLoggingEnabled = DiagnosticLoggingEnabled,
@@ -82,6 +97,8 @@ public sealed class AppSettings
         CursorUsageMode = NormalizeCursorUsageMode();
 
         CursorApiKey = CursorApiKey.Trim();
+        AnthropicApiCreditsOrganizationUuid = AnthropicApiCreditsOrganizationUuid.Trim();
+        AnthropicApiCreditsOrganizationName = AnthropicApiCreditsOrganizationName.Trim();
 
         if (CursorIncludedBudgetDollars <= 0 || double.IsNaN(CursorIncludedBudgetDollars) || double.IsInfinity(CursorIncludedBudgetDollars))
         {
@@ -135,10 +152,12 @@ public sealed class AppSettings
 
     private static Dictionary<string, bool> CreateDefaultEnabledProviders()
     {
-        return KnownProviders.All.ToDictionary(
+        var providers = KnownProviders.All.ToDictionary(
             providerName => providerName,
             _ => true,
             StringComparer.OrdinalIgnoreCase);
+        providers[KnownProviders.AnthropicApiCredits] = false;
+        return providers;
     }
 
     private static Dictionary<string, bool> NormalizeEnabledProviders(Dictionary<string, bool>? enabledProviders)
@@ -157,6 +176,37 @@ public sealed class AppSettings
         }
 
         return normalizedProviders;
+    }
+}
+
+public sealed class AnthropicApiCreditsBalanceCache
+{
+    public decimal AmountCents { get; set; }
+
+    public decimal? PendingInvoiceAmountCents { get; set; }
+
+    public decimal? ExpiringAmountCents { get; set; }
+
+    public DateTimeOffset? ExpiresAt { get; set; }
+
+    public DateTimeOffset VerifiedAt { get; set; }
+
+    public string OrganizationUuid { get; set; } = string.Empty;
+
+    public string OrganizationName { get; set; } = string.Empty;
+
+    public AnthropicApiCreditsBalanceCache Clone()
+    {
+        return new AnthropicApiCreditsBalanceCache
+        {
+            AmountCents = AmountCents,
+            PendingInvoiceAmountCents = PendingInvoiceAmountCents,
+            ExpiringAmountCents = ExpiringAmountCents,
+            ExpiresAt = ExpiresAt,
+            VerifiedAt = VerifiedAt,
+            OrganizationUuid = OrganizationUuid,
+            OrganizationName = OrganizationName
+        };
     }
 }
 

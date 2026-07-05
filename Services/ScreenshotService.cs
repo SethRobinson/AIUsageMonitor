@@ -176,6 +176,7 @@ internal static class ScreenshotService
                             ResetAt = RebaseTime(window.ResetAt, originalGeneratedAt, generatedAt),
                             Detail = window.Detail,
                             HideReset = window.HideReset,
+                            IsBalance = window.IsBalance,
                             IsInactive = window.IsInactive
                         })
                         .ToList()

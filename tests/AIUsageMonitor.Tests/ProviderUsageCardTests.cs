@@ -84,6 +84,44 @@ public sealed class ProviderUsageCardTests
     }
 
     [TestMethod]
+    public void BalanceWindowUsesAmountSummaryWithoutProgress()
+    {
+        var usage = new ProviderUsage
+        {
+            Name = KnownProviders.AnthropicApiCredits,
+            Source = "Test",
+            StatusMessage = "Test usage.",
+            LastCheckedAt = DateTimeOffset.Now,
+            Windows =
+            [
+                new UsageWindow
+                {
+                    Title = "Prepaid credits",
+                    Limit = 100,
+                    Used = 0,
+                    Remaining = 100,
+                    RemainingText = "$170.00 left",
+                    Detail = "Verified now",
+                    HideReset = true,
+                    IsBalance = true
+                }
+            ]
+        };
+
+        var card = new ProviderUsageCard(usage);
+
+        Assert.AreEqual("Anthropic API Credits - $170.00 left", card.SummaryText);
+        Assert.AreEqual("$170.00 left - Anthropic API Credits", card.CompactSummaryText);
+        Assert.AreEqual("$170.00 left", card.MiniSummaryText);
+        Assert.AreEqual("$170.00 left", card.BalanceSummaryText);
+        Assert.IsTrue(card.IsBalanceOnly);
+        Assert.IsFalse(card.ShowsSummaryProgress);
+        Assert.AreEqual(1, card.Windows.Count);
+        Assert.IsTrue(card.Windows[0].IsBalance);
+        Assert.IsFalse(card.Windows[0].ShowsProgress);
+    }
+
+    [TestMethod]
     public void SupplementalDisplayGroupsRenderAsSeparateProviderCards()
     {
         var viewModel = new UsageOverlayViewModel();

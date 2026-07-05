@@ -14,7 +14,9 @@ public sealed class UsageWindowDisplay
         UsedPercent = usageWindow.UsedPercent;
         RemainingPercent = usageWindow.RemainingPercent;
         Detail = usageWindow.Detail;
+        IsBalance = usageWindow.IsBalance;
         IsInactive = usageWindow.IsInactive;
+        ShowsProgress = !usageWindow.IsBalance;
 
         if (usageWindow.IsInactive)
         {
@@ -30,6 +32,7 @@ public sealed class UsageWindowDisplay
             StatusBrush = muted.Foreground;
             StatusBackground = muted.Background;
             ProgressBrush = UsageBrushes.FrozenBrush("#4B5563");
+            ShowsProgress = false;
             return;
         }
 
@@ -59,6 +62,10 @@ public sealed class UsageWindowDisplay
     public string Title { get; }
 
     public bool IsInactive { get; }
+
+    public bool IsBalance { get; }
+
+    public bool ShowsProgress { get; }
 
     public double Limit { get; }
 

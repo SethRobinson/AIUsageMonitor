@@ -533,9 +533,19 @@
 
                                                             <ProgressBar Margin="0,9,0,0"
                                                                          Height="12"
-                                                                         Style="{StaticResource UsageProgressBarStyle}"
                                                                          Value="{Binding RemainingPercent, Mode=OneWay}"
-                                                                         Foreground="{Binding ProgressBrush}" />
+                                                                         Foreground="{Binding ProgressBrush}">
+                                                                <ProgressBar.Style>
+                                                                    <Style TargetType="{x:Type ProgressBar}"
+                                                                           BasedOn="{StaticResource UsageProgressBarStyle}">
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding ShowsProgress}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </ProgressBar.Style>
+                                                            </ProgressBar>
 
                                                             <Grid Margin="0,9,0,0">
                                                                 <Grid.ColumnDefinitions>
@@ -573,7 +583,7 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding SummaryText}"
+                                                <TextBlock Text="{Binding CompactSummaryText}"
                                                            Foreground="#F3F4F6"
                                                            FontSize="15"
                                                            FontWeight="SemiBold"
@@ -613,9 +623,19 @@
                                                                          Margin="8,0,8,0"
                                                                          Height="6"
                                                                          VerticalAlignment="Center"
-                                                                         Style="{StaticResource UsageProgressBarStyle}"
                                                                          Value="{Binding RemainingPercent, Mode=OneWay}"
-                                                                         Foreground="{Binding ProgressBrush}" />
+                                                                         Foreground="{Binding ProgressBrush}">
+                                                                <ProgressBar.Style>
+                                                                    <Style TargetType="{x:Type ProgressBar}"
+                                                                           BasedOn="{StaticResource UsageProgressBarStyle}">
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding ShowsProgress}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </ProgressBar.Style>
+                                                            </ProgressBar>
                                                             <TextBlock Grid.Column="2"
                                                                        Margin="8,0,0,0"
                                                                        Text="{Binding ResetRelativeText}"
@@ -638,16 +658,26 @@
 
                                         <StackPanel Style="{StaticResource CardMiniOnlyElementStyle}"
                                                     VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding SummaryText}"
+                                            <TextBlock Text="{Binding MiniSummaryText}"
                                                        Foreground="#F3F4F6"
                                                        FontSize="12"
                                                        FontWeight="SemiBold"
                                                        TextTrimming="CharacterEllipsis" />
                                             <ProgressBar Margin="0,4,0,0"
                                                          Height="4"
-                                                         Style="{StaticResource UsageProgressBarStyle}"
                                                          Value="{Binding PrimaryRemainingPercent, Mode=OneWay}"
-                                                         Foreground="{Binding SummaryProgressBrush}" />
+                                                         Foreground="{Binding SummaryProgressBrush}">
+                                                <ProgressBar.Style>
+                                                    <Style TargetType="{x:Type ProgressBar}"
+                                                           BasedOn="{StaticResource UsageProgressBarStyle}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding ShowsSummaryProgress}" Value="False">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ProgressBar.Style>
+                                            </ProgressBar>
                                         </StackPanel>
                                     </Grid>
                                 </Border>

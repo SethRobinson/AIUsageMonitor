@@ -41,6 +41,23 @@
       ]
     },
     {
+      "name": "Anthropic API Credits",
+      "source": "Fake data",
+      "statusMessage": "Anthropic Console prepaid API credit balance.",
+      "windows": [
+      {
+        "title": "Prepaid credits",
+        "limit": 100,
+        "used": 0,
+        "remaining": 100,
+        "remainingText": "$170.00 left",
+        "detail": "Seth; $25.00 expires Aug 1; verified now",
+        "hideReset": true,
+        "isBalance": true
+      }
+      ]
+    },
+    {
       "name": "OpenAI",
       "planName": "Pro",
       "source": "Fake data",

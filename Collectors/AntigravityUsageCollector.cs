@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AIUsageMonitor.Models;
+using Microsoft.Data.Sqlite;
 
 namespace AIUsageMonitor.Collectors;
 
@@ -16,8 +17,12 @@ public sealed class AntigravityUsageCollector : IUsageCollector
     private const string ServiceName = "exa.language_server_pb.LanguageServerService";
     private const string CsrfHeader = "x-codeium-csrf-token";
     private const int LogTailCharacters = 256 * 1024;
-    private static readonly TimeSpan TemporaryServerTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan QuotaDiscoveryTimeout = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan TemporaryServerTimeout = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan TemporaryServerPollInterval = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan CachedStateMaxAge = TimeSpan.FromDays(8);
+    private static readonly bool EnableTemporaryLanguageServerProbe = true;
 
     private static readonly HttpClient HttpClient = new(new HttpClientHandler
     {
@@ -38,6 +43,10 @@ public sealed class AntigravityUsageCollector : IUsageCollector
 
     private static readonly Regex CliCsrfTokenRegex = new(
         @"--csrf[_-]token\s+(?<token>\S+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex OverrideIdeVersionRegex = new(
+        @"--override_ide_version\s+(?<version>\S+)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly Regex ResourceExhaustedResetRegex = new(
@@ -63,7 +72,16 @@ public sealed class AntigravityUsageCollector : IUsageCollector
             return usage;
         }
 
-        usage = await TryCollectFromTemporaryLanguageServerAsync(cancellationToken);
+        if (EnableTemporaryLanguageServerProbe)
+        {
+            usage = await TryCollectFromTemporaryLanguageServerAsync(cancellationToken);
+            if (usage is not null)
+            {
+                return usage;
+            }
+        }
+
+        usage = TryCollectCachedStateUsage();
         if (usage is not null)
         {
             return usage;
@@ -81,15 +99,25 @@ public sealed class AntigravityUsageCollector : IUsageCollector
 
     private static async Task<ProviderUsage?> TryCollectQuotaAsync(string home, CancellationToken cancellationToken)
     {
-        foreach (var endpoint in await FindEndpointsAsync(home, cancellationToken))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
+        using var discoveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        discoveryCts.CancelAfter(QuotaDiscoveryTimeout);
 
-            var usage = await TryCollectEndpointAsync(endpoint, cancellationToken);
-            if (usage is not null)
+        try
+        {
+            foreach (var endpoint in await FindEndpointsAsync(home, discoveryCts.Token))
             {
-                return usage;
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var usage = await TryCollectEndpointAsync(endpoint, discoveryCts.Token);
+                if (usage is not null)
+                {
+                    return usage;
+                }
             }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
         }
 
         return null;
@@ -157,9 +185,10 @@ public sealed class AntigravityUsageCollector : IUsageCollector
         }
 
         var csrfToken = Guid.NewGuid().ToString();
+        var ideVersion = GetAntigravityIdeVersion(languageServerPath);
         using var process = new Process
         {
-            StartInfo = BuildLanguageServerStartInfo(languageServerPath, port.Value, csrfToken)
+            StartInfo = BuildLanguageServerStartInfo(languageServerPath, port.Value, csrfToken, ideVersion)
         };
 
         try
@@ -245,7 +274,8 @@ public sealed class AntigravityUsageCollector : IUsageCollector
     private static ProcessStartInfo BuildLanguageServerStartInfo(
         string languageServerPath,
         int port,
-        string csrfToken)
+        string csrfToken,
+        string ideVersion)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -262,7 +292,7 @@ public sealed class AntigravityUsageCollector : IUsageCollector
             "--subclient_type",
             "hub",
             "--override_ide_version",
-            "2.0.1",
+            ideVersion,
             "--override_user_agent_name",
             "antigravity",
             "--https_server_port",
@@ -284,6 +314,68 @@ public sealed class AntigravityUsageCollector : IUsageCollector
         return startInfo;
     }
 
+    private static string GetAntigravityIdeVersion(string languageServerPath)
+    {
+        return TryGetLatestLogIdeVersion() ??
+            TryGetExecutableFileVersion(languageServerPath) ??
+            "2.1.4";
+    }
+
+    private static string? TryGetLatestLogIdeVersion()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (var path in GetLogPaths(home))
+        {
+            var text = TryReadFileTail(path, LogTailCharacters);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var matches = OverrideIdeVersionRegex.Matches(text);
+            if (matches.Count > 0)
+            {
+                var version = matches[^1].Groups["version"].Value.Trim();
+                if (IsLikelyVersion(version))
+                {
+                    return version;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryGetExecutableFileVersion(string languageServerPath)
+    {
+        try
+        {
+            var rootDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(languageServerPath) ?? string.Empty,
+                "..",
+                ".."));
+            var executablePath = Path.Combine(rootDirectory, "Antigravity.exe");
+            if (!File.Exists(executablePath))
+            {
+                return null;
+            }
+
+            var version = FileVersionInfo.GetVersionInfo(executablePath).FileVersion;
+            return IsLikelyVersion(version) ? version : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsLikelyVersion(string? version)
+    {
+        return !string.IsNullOrWhiteSpace(version) &&
+            version.Length <= 32 &&
+            version.All(character => char.IsDigit(character) || character == '.' || character == '-');
+    }
+
     private static void TryKill(Process process)
     {
         try
@@ -296,6 +388,450 @@ public sealed class AntigravityUsageCollector : IUsageCollector
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
         }
+    }
+
+    private static ProviderUsage? TryCollectCachedStateUsage()
+    {
+        foreach (var databasePath in GetStateDatabasePaths())
+        {
+            if (!File.Exists(databasePath))
+            {
+                continue;
+            }
+
+            var capturedAt = new DateTimeOffset(File.GetLastWriteTime(databasePath));
+            if (DateTimeOffset.Now - capturedAt > CachedStateMaxAge)
+            {
+                continue;
+            }
+
+            var source = $"Antigravity local state cache ({Path.GetFileName(databasePath)})";
+            var usage = TryReadCachedStateUsage(databasePath, capturedAt, source);
+            if (usage is not null)
+            {
+                return usage;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> GetStateDatabasePaths()
+    {
+        var applicationData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (string.IsNullOrWhiteSpace(applicationData))
+        {
+            yield break;
+        }
+
+        yield return Path.Combine(applicationData, "Antigravity", "User", "globalStorage", "state.vscdb");
+        yield return Path.Combine(applicationData, "Antigravity IDE", "User", "globalStorage", "state.vscdb");
+    }
+
+    private static ProviderUsage? TryReadCachedStateUsage(
+        string databasePath,
+        DateTimeOffset capturedAt,
+        string source)
+    {
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Cache = SqliteCacheMode.Shared
+            };
+
+            using var connection = new SqliteConnection(builder.ToString());
+            connection.Open();
+
+            var authStatus = TryReadStateValue(connection, "antigravityAuthStatus");
+            if (!string.IsNullOrWhiteSpace(authStatus))
+            {
+                var usage = TryBuildCachedUsageFromAuthStatus(authStatus, capturedAt, source);
+                if (usage is not null)
+                {
+                    return usage;
+                }
+            }
+
+            var commandModelConfigs = TryReadStateValue(connection, "antigravity_allowed_command_model_configs");
+            if (!string.IsNullOrWhiteSpace(commandModelConfigs))
+            {
+                var usage = TryBuildCachedUsageFromModelConfigArray(
+                    commandModelConfigs,
+                    capturedAt,
+                    source,
+                    "Antigravity");
+                if (usage is not null)
+                {
+                    return usage;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or JsonException or FormatException or InvalidOperationException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static string? TryReadStateValue(SqliteConnection connection, string key)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM ItemTable WHERE key = $key LIMIT 1";
+        command.Parameters.AddWithValue("$key", key);
+        return command.ExecuteScalar() as string;
+    }
+
+    private static ProviderUsage? TryBuildCachedUsageFromAuthStatus(
+        string authStatusJson,
+        DateTimeOffset capturedAt,
+        string source)
+    {
+        using var document = JsonDocument.Parse(authStatusJson);
+        if (!document.RootElement.TryGetProperty("userStatusProtoBinaryBase64", out var protoElement) ||
+            protoElement.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(protoElement.GetString()))
+        {
+            return null;
+        }
+
+        var protoBytes = DecodeBase64(protoElement.GetString()!);
+        return protoBytes is null
+            ? null
+            : TryBuildCachedUsageFromUserStatusProto(protoBytes, capturedAt, source);
+    }
+
+    private static ProviderUsage? TryBuildCachedUsageFromModelConfigArray(
+        string modelConfigArrayJson,
+        DateTimeOffset capturedAt,
+        string source,
+        string planName)
+    {
+        using var document = JsonDocument.Parse(modelConfigArrayJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var now = DateTimeOffset.Now;
+        var quotas = new List<ModelQuota>();
+        foreach (var element in document.RootElement.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(element.GetString()))
+            {
+                continue;
+            }
+
+            var modelBytes = DecodeBase64(element.GetString()!);
+            var quota = modelBytes is null ? null : TryParseCachedModelQuota(modelBytes, now);
+            if (quota is not null)
+            {
+                quotas.Add(quota);
+            }
+        }
+
+        return BuildUsageFromModelQuotas(quotas, source, planName, cached: true, capturedAt);
+    }
+
+    private static byte[]? DecodeBase64(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        var padding = trimmed.Length % 4;
+        if (padding > 0)
+        {
+            trimmed = trimmed.PadRight(trimmed.Length + (4 - padding), '=');
+        }
+
+        return Convert.FromBase64String(trimmed);
+    }
+
+    private static ProviderUsage? TryBuildCachedUsageFromUserStatusProto(
+        byte[] protoBytes,
+        DateTimeOffset capturedAt,
+        string source)
+    {
+        var now = DateTimeOffset.Now;
+        var quotas = new List<ModelQuota>();
+        var planName = TryParseCachedPlanName(protoBytes) ?? "Antigravity";
+
+        foreach (var field in ReadProtoFields(protoBytes))
+        {
+            if (field.Number != 33 || field.WireType != 2)
+            {
+                continue;
+            }
+
+            foreach (var nestedField in ReadProtoFields(field.Data))
+            {
+                if (nestedField.Number != 1 || nestedField.WireType != 2)
+                {
+                    continue;
+                }
+
+                var quota = TryParseCachedModelQuota(nestedField.Data.ToArray(), now);
+                if (quota is not null)
+                {
+                    quotas.Add(quota);
+                }
+            }
+        }
+
+        return BuildUsageFromModelQuotas(quotas, source, planName, cached: true, capturedAt);
+    }
+
+    internal static ProviderUsage? TryBuildCachedUsageFromModelConfigBytesForTests(
+        IReadOnlyList<byte[]> modelConfigBytes,
+        string planName,
+        DateTimeOffset capturedAt,
+        DateTimeOffset now)
+    {
+        var quotas = modelConfigBytes
+            .Select(bytes => TryParseCachedModelQuota(bytes, now))
+            .Where(quota => quota is not null)
+            .Select(quota => quota!)
+            .ToList();
+
+        return BuildUsageFromModelQuotas(
+            quotas,
+            "Antigravity local state cache",
+            planName,
+            cached: true,
+            capturedAt);
+    }
+
+    private static string? TryParseCachedPlanName(byte[] protoBytes)
+    {
+        foreach (var field in ReadProtoFields(protoBytes))
+        {
+            if (field.Number != 36 || field.WireType != 2)
+            {
+                continue;
+            }
+
+            foreach (var planField in ReadProtoFields(field.Data))
+            {
+                if (planField.WireType != 2 ||
+                    planField.Number is not (2 or 3) ||
+                    !TryReadUtf8(planField.Data.Span, out var text) ||
+                    string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                return PlanNameFormatter.Format(text);
+            }
+        }
+
+        return null;
+    }
+
+    private static ModelQuota? TryParseCachedModelQuota(byte[] modelBytes, DateTimeOffset now)
+    {
+        string? modelName = null;
+        double? remainingFraction = null;
+        DateTimeOffset? resetAt = null;
+
+        foreach (var field in ReadProtoFields(modelBytes))
+        {
+            if (field.Number == 1 &&
+                field.WireType == 2 &&
+                TryReadUtf8(field.Data.Span, out var parsedName))
+            {
+                modelName = parsedName;
+                continue;
+            }
+
+            if (field.Number != 15 || field.WireType != 2)
+            {
+                continue;
+            }
+
+            foreach (var quotaField in ReadProtoFields(field.Data))
+            {
+                if (quotaField.Number == 1)
+                {
+                    remainingFraction = quotaField.WireType switch
+                    {
+                        1 => quotaField.Float64,
+                        5 => quotaField.Float32,
+                        0 => quotaField.Varint,
+                        _ => remainingFraction
+                    };
+                }
+                else if (quotaField.Number == 2 && quotaField.WireType == 2)
+                {
+                    resetAt = TryParseProtoTimestamp(quotaField.Data);
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(modelName) ||
+            !TryGetModelFamily(modelName, out var family) ||
+            remainingFraction is null ||
+            double.IsNaN(remainingFraction.Value) ||
+            double.IsInfinity(remainingFraction.Value))
+        {
+            return null;
+        }
+
+        if (resetAt <= now.AddMinutes(-1))
+        {
+            resetAt = null;
+        }
+
+        return new ModelQuota(
+            family,
+            Math.Clamp(remainingFraction.Value, 0, 1),
+            resetAt);
+    }
+
+    private static DateTimeOffset? TryParseProtoTimestamp(ReadOnlyMemory<byte> timestampBytes)
+    {
+        foreach (var field in ReadProtoFields(timestampBytes))
+        {
+            if (field.Number != 1 || field.WireType != 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                return field.Varint > 10_000_000_000
+                    ? DateTimeOffset.FromUnixTimeMilliseconds((long)field.Varint)
+                    : DateTimeOffset.FromUnixTimeSeconds((long)field.Varint);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<ProtoField> ReadProtoFields(ReadOnlyMemory<byte> bytes)
+    {
+        var fields = new List<ProtoField>();
+        var offset = 0;
+        var span = bytes.Span;
+        while (offset < span.Length)
+        {
+            if (!TryReadVarint(span, ref offset, out var key))
+            {
+                return fields;
+            }
+
+            var number = (int)(key >> 3);
+            var wireType = (int)(key & 7);
+            switch (wireType)
+            {
+                case 0:
+                    if (!TryReadVarint(span, ref offset, out var varint))
+                    {
+                        return fields;
+                    }
+
+                    fields.Add(new ProtoField(number, wireType, ReadOnlyMemory<byte>.Empty, varint, 0, 0));
+                    break;
+                case 1:
+                    if (offset + 8 > span.Length)
+                    {
+                        return fields;
+                    }
+
+                    var fixed64 = bytes.Slice(offset, 8);
+                    offset += 8;
+                    fields.Add(new ProtoField(
+                        number,
+                        wireType,
+                        fixed64,
+                        0,
+                        0,
+                        BitConverter.ToDouble(fixed64.Span)));
+                    break;
+                case 2:
+                    if (!TryReadVarint(span, ref offset, out var length) ||
+                        length > int.MaxValue ||
+                        offset + (int)length > span.Length)
+                    {
+                        return fields;
+                    }
+
+                    var data = bytes.Slice(offset, (int)length);
+                    offset += (int)length;
+                    fields.Add(new ProtoField(number, wireType, data, 0, 0, 0));
+                    break;
+                case 5:
+                    if (offset + 4 > span.Length)
+                    {
+                        return fields;
+                    }
+
+                    var fixed32 = bytes.Slice(offset, 4);
+                    offset += 4;
+                    fields.Add(new ProtoField(
+                        number,
+                        wireType,
+                        fixed32,
+                        0,
+                        BitConverter.ToSingle(fixed32.Span),
+                        0));
+                    break;
+                default:
+                    return fields;
+            }
+        }
+
+        return fields;
+    }
+
+    private static bool TryReadVarint(ReadOnlySpan<byte> span, ref int offset, out ulong value)
+    {
+        value = 0;
+        var shift = 0;
+
+        while (offset < span.Length && shift <= 63)
+        {
+            var current = span[offset++];
+            value |= (ulong)(current & 0x7F) << shift;
+            if ((current & 0x80) == 0)
+            {
+                return true;
+            }
+
+            shift += 7;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadUtf8(ReadOnlySpan<byte> bytes, out string text)
+    {
+        text = string.Empty;
+        if (bytes.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            text = Encoding.UTF8.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+
+        return text.All(character => !char.IsControl(character) || character is '\r' or '\n' or '\t');
     }
 
     private static async Task<IReadOnlyList<Endpoint>> FindEndpointsAsync(
@@ -518,14 +1054,16 @@ public sealed class AntigravityUsageCollector : IUsageCollector
     {
         try
         {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(RequestTimeout);
             using var request = new HttpRequestMessage(HttpMethod.Get, baseUri);
-            using var response = await HttpClient.SendAsync(request, cancellationToken);
+            using var response = await HttpClient.SendAsync(request, timeoutCts.Token);
             if (!response.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            var html = await response.Content.ReadAsStringAsync(cancellationToken);
+            var html = await response.Content.ReadAsStringAsync(timeoutCts.Token);
             var match = CsrfTokenRegex.Match(html);
             return match.Success ? match.Groups["token"].Value : null;
         }
@@ -534,6 +1072,10 @@ public sealed class AntigravityUsageCollector : IUsageCollector
             return null;
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             return null;
         }
@@ -551,18 +1093,20 @@ public sealed class AntigravityUsageCollector : IUsageCollector
         try
         {
             var requestUri = new Uri(endpoint.BaseUri, $"{ServiceName}/{method}");
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(RequestTimeout);
             using var request = new HttpRequestMessage(HttpMethod.Post, requestUri);
             request.Headers.TryAddWithoutValidation(CsrfHeader, endpoint.CsrfToken);
             request.Content = new StringContent(GetRequestBody(method), Encoding.UTF8, "application/json");
 
-            using var response = await HttpClient.SendAsync(request, cancellationToken);
+            using var response = await HttpClient.SendAsync(request, timeoutCts.Token);
             if (!response.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token);
+            return await JsonDocument.ParseAsync(stream, cancellationToken: timeoutCts.Token);
         }
         catch (HttpRequestException)
         {
@@ -573,6 +1117,10 @@ public sealed class AntigravityUsageCollector : IUsageCollector
             return null;
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             return null;
         }
@@ -856,10 +1404,27 @@ public sealed class AntigravityUsageCollector : IUsageCollector
         Endpoint endpoint,
         string planName)
     {
-        var quotaByFamily = models
+        var quotas = models
             .Select(TryParseModelQuota)
             .Where(quota => quota is not null)
-            .Select(quota => quota!)
+            .Select(quota => quota!);
+
+        return BuildUsageFromModelQuotas(
+            quotas,
+            endpoint.Source ?? $"Antigravity language server ({endpoint.BaseUri})",
+            planName,
+            cached: false,
+            capturedAt: null);
+    }
+
+    private static ProviderUsage? BuildUsageFromModelQuotas(
+        IEnumerable<ModelQuota> modelQuotas,
+        string source,
+        string planName,
+        bool cached,
+        DateTimeOffset? capturedAt)
+    {
+        var quotaByFamily = modelQuotas
             .GroupBy(quota => quota.Family, StringComparer.OrdinalIgnoreCase)
             .OrderBy(group => group.Key)
             .ToList();
@@ -889,8 +1454,10 @@ public sealed class AntigravityUsageCollector : IUsageCollector
         {
             Name = KnownProviders.Antigravity,
             PlanName = planName,
-            Source = endpoint.Source ?? $"Antigravity language server ({endpoint.BaseUri})",
-            StatusMessage = windows.Any(window => window.RemainingPercent <= 0.05)
+            Source = source,
+            StatusMessage = cached
+                ? $"Cached Antigravity model quota from local app state{FormatCapturedAt(capturedAt)}."
+                : windows.Any(window => window.RemainingPercent <= 0.05)
                 ? "Antigravity baseline quota is exhausted."
                 : "Antigravity model quota from local language server.",
             Windows = windows
@@ -913,7 +1480,7 @@ public sealed class AntigravityUsageCollector : IUsageCollector
             modelId;
         var searchableName = $"{modelId} {label}";
 
-        if (!searchableName.Contains("gemini", StringComparison.OrdinalIgnoreCase) ||
+        if (!TryGetModelFamily(searchableName, out var family) ||
             (!TryGetObject(element, "quotaInfo", out var quotaInfo) &&
              !TryGetObject(element, "quota_info", out quotaInfo)))
         {
@@ -938,7 +1505,7 @@ public sealed class AntigravityUsageCollector : IUsageCollector
         }
 
         return new ModelQuota(
-            GetModelFamily(searchableName),
+            family,
             Math.Clamp(remainingFraction, 0, 1),
             resetAt);
     }
@@ -992,19 +1559,49 @@ public sealed class AntigravityUsageCollector : IUsageCollector
         return PlanNameFormatter.Format(rawPlanName);
     }
 
-    private static string GetModelFamily(string modelId)
+    private static string FormatCapturedAt(DateTimeOffset? capturedAt)
     {
-        if (modelId.Contains("pro", StringComparison.OrdinalIgnoreCase))
+        return capturedAt is null
+            ? string.Empty
+            : $" last updated {capturedAt.Value.ToLocalTime():MMM d, h:mm tt}";
+    }
+
+    private static bool TryGetModelFamily(string modelId, out string family)
+    {
+        if (modelId.Contains("gemini", StringComparison.OrdinalIgnoreCase) &&
+            modelId.Contains("pro", StringComparison.OrdinalIgnoreCase))
         {
-            return "Gemini Pro";
+            family = "Gemini Pro";
+            return true;
         }
 
-        if (modelId.Contains("flash", StringComparison.OrdinalIgnoreCase))
+        if (modelId.Contains("gemini", StringComparison.OrdinalIgnoreCase) &&
+            modelId.Contains("flash", StringComparison.OrdinalIgnoreCase))
         {
-            return "Gemini Flash";
+            family = "Gemini Flash";
+            return true;
         }
 
-        return "Gemini Models";
+        if (modelId.Contains("gemini", StringComparison.OrdinalIgnoreCase))
+        {
+            family = "Gemini Models";
+            return true;
+        }
+
+        if (modelId.Contains("claude", StringComparison.OrdinalIgnoreCase))
+        {
+            family = "Claude";
+            return true;
+        }
+
+        if (modelId.Contains("gpt", StringComparison.OrdinalIgnoreCase))
+        {
+            family = "GPT";
+            return true;
+        }
+
+        family = string.Empty;
+        return false;
     }
 
     private static string? TryGetString(JsonElement element, string propertyName)
@@ -1081,4 +1678,12 @@ public sealed class AntigravityUsageCollector : IUsageCollector
     private sealed record LogExhaustionRecord(DateTimeOffset Timestamp, DateTimeOffset ResetAt, string SourcePath);
 
     private sealed record ModelQuota(string Family, double RemainingFraction, DateTimeOffset? ResetAt);
+
+    private readonly record struct ProtoField(
+        int Number,
+        int WireType,
+        ReadOnlyMemory<byte> Data,
+        ulong Varint,
+        float Float32,
+        double Float64);
 }

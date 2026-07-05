@@ -23,6 +23,12 @@ public sealed class UsageWindow
     public bool HideReset { get; init; }
 
     /// <summary>
+    /// True for absolute balances, such as prepaid API credits, where a progress percentage would
+    /// imply a known total limit that the provider did not actually report.
+    /// </summary>
+    public bool IsBalance { get; init; }
+
+    /// <summary>
     /// True when this model family has no usable quota on the current account/plan — e.g. a free
     /// Google tier that still returns an empty, already-reset "Pro" bucket. Inactive windows are
     /// shown muted as "Not on this plan" and are excluded from the provider card's headline percent

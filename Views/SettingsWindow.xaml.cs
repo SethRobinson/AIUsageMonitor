@@ -25,10 +25,12 @@ public partial class SettingsWindow : Window
         UiScaleSlider.Value = Settings.UiScalePercent;
         UpdateUiScaleValueLabel(Settings.UiScalePercent);
         AnthropicProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Anthropic);
+        AnthropicApiCreditsProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.AnthropicApiCredits);
         OpenAiProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.OpenAI);
         AntigravityProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Antigravity);
         GeminiProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Gemini);
         CursorProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Cursor);
+        UpdateAnthropicApiCreditsSummary();
         UpdateCursorModeSummary();
         ClaudeStatusExporterCheckBox.IsChecked = Settings.ClaudeStatusExporterEnabled;
         AutoRunAtLoginCheckBox.IsChecked = Settings.AutoRunAtLoginEnabled || Services.AutoRunService.IsEnabled();
@@ -78,6 +80,27 @@ public partial class SettingsWindow : Window
 
         Settings = setupWindow.Settings;
         UpdateCursorModeSummary();
+    }
+
+    private void AnthropicApiCreditsSetupButtonOnClick(object sender, RoutedEventArgs e)
+    {
+        ApplySettingsFromControls();
+        AnthropicApiCreditsProviderEnabledCheckBox.IsChecked = true;
+
+        var setupWindow = new AnthropicApiCreditsSetupWindow(_settingsService, _logService)
+        {
+            Owner = this
+        };
+
+        if (setupWindow.ShowDialog() != true)
+        {
+            MergeSavedAnthropicApiCreditsLogin();
+            UpdateAnthropicApiCreditsSummary();
+            return;
+        }
+
+        MergeSavedAnthropicApiCreditsLogin();
+        UpdateAnthropicApiCreditsSummary();
     }
 
     private void ProviderSetupButtonOnClick(object sender, RoutedEventArgs e)
@@ -201,6 +224,7 @@ public partial class SettingsWindow : Window
     {
         Settings.UiScalePercent = GetSelectedUiScalePercent();
         Settings.SetProviderEnabled(KnownProviders.Anthropic, AnthropicProviderEnabledCheckBox.IsChecked == true);
+        Settings.SetProviderEnabled(KnownProviders.AnthropicApiCredits, AnthropicApiCreditsProviderEnabledCheckBox.IsChecked == true);
         Settings.SetProviderEnabled(KnownProviders.OpenAI, OpenAiProviderEnabledCheckBox.IsChecked == true);
         Settings.SetProviderEnabled(KnownProviders.Antigravity, AntigravityProviderEnabledCheckBox.IsChecked == true);
         Settings.SetProviderEnabled(KnownProviders.Gemini, GeminiProviderEnabledCheckBox.IsChecked == true);
@@ -209,6 +233,7 @@ public partial class SettingsWindow : Window
         Settings.AutoRunAtLoginEnabled = AutoRunAtLoginCheckBox.IsChecked == true;
         Settings.DiagnosticLoggingEnabled = DiagnosticLoggingCheckBox.IsChecked == true;
         Settings.AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true;
+        MergeSavedAnthropicApiCreditsLogin();
         MergeSavedCursorDashboardLogin();
         Settings.Normalize();
     }
@@ -267,6 +292,26 @@ public partial class SettingsWindow : Window
         CursorModeSummaryTextBlock.Text = string.Equals(Settings.CursorUsageMode, AppSettings.CursorUsageModeTeamsApiKey, StringComparison.Ordinal)
             ? "Mode: Teams Admin API key"
             : "Mode: Personal subscription dashboard login";
+    }
+
+    private void UpdateAnthropicApiCreditsSummary()
+    {
+        Settings.Normalize();
+        AnthropicApiCreditsSummaryTextBlock.Text = Settings.AnthropicApiCreditsCookiesCapturedAt is { } capturedAt
+            ? string.IsNullOrWhiteSpace(Settings.AnthropicApiCreditsOrganizationName)
+                ? $"Console billing login saved {capturedAt.ToLocalTime():MMM d, yyyy h:mm tt}."
+                : $"Console billing login saved {capturedAt.ToLocalTime():MMM d, yyyy h:mm tt} for {Settings.AnthropicApiCreditsOrganizationName}."
+            : "Console billing login is not saved yet.";
+    }
+
+    private void MergeSavedAnthropicApiCreditsLogin()
+    {
+        var savedSettings = _settingsService.Load();
+        Settings.AnthropicApiCreditsCookieHeaderProtected = savedSettings.AnthropicApiCreditsCookieHeaderProtected;
+        Settings.AnthropicApiCreditsCookiesCapturedAt = savedSettings.AnthropicApiCreditsCookiesCapturedAt;
+        Settings.AnthropicApiCreditsOrganizationUuid = savedSettings.AnthropicApiCreditsOrganizationUuid;
+        Settings.AnthropicApiCreditsOrganizationName = savedSettings.AnthropicApiCreditsOrganizationName;
+        Settings.AnthropicApiCreditsLastBalance = savedSettings.AnthropicApiCreditsLastBalance?.Clone();
     }
 
     private void MergeSavedCursorDashboardLogin()
