@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -1344,7 +1345,7 @@ public sealed class AntigravityUsageCollector : IUsageCollector
 
         foreach (Match match in DurationPartRegex.Matches(text))
         {
-            if (!double.TryParse(match.Groups["value"].Value, out var value))
+            if (!ProviderJson.TryParseDouble(match.Groups["value"].Value, out var value))
             {
                 continue;
             }
@@ -1367,9 +1368,9 @@ public sealed class AntigravityUsageCollector : IUsageCollector
     {
         var match = LogTimestampRegex.Match(line);
         if (!match.Success ||
-            !int.TryParse(match.Groups["month"].Value, out var month) ||
-            !int.TryParse(match.Groups["day"].Value, out var day) ||
-            !TimeSpan.TryParse(match.Groups["time"].Value, out var time))
+            !int.TryParse(match.Groups["month"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var month) ||
+            !int.TryParse(match.Groups["day"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var day) ||
+            !TimeSpan.TryParseExact(match.Groups["time"].Value, "c", CultureInfo.InvariantCulture, out var time))
         {
             return null;
         }
@@ -1606,9 +1607,7 @@ public sealed class AntigravityUsageCollector : IUsageCollector
 
     private static string? TryGetString(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
-            ? property.GetString()
-            : null;
+        return ProviderJson.TryGetString(element, propertyName);
     }
 
     private static string? TryGetNestedString(JsonElement element, string propertyName, string childPropertyName)
@@ -1644,31 +1643,12 @@ public sealed class AntigravityUsageCollector : IUsageCollector
 
     private static bool TryGetDouble(JsonElement element, string propertyName, out double value)
     {
-        value = 0;
-        if (!element.TryGetProperty(propertyName, out var property))
-        {
-            return false;
-        }
-
-        return property.ValueKind switch
-        {
-            JsonValueKind.Number => property.TryGetDouble(out value),
-            JsonValueKind.String => double.TryParse(
-                property.GetString(),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out value),
-            _ => false
-        };
+        return ProviderJson.TryGetDouble(element, propertyName, out value);
     }
 
     private static DateTimeOffset? TryGetDateTimeOffset(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out var property) &&
-            property.ValueKind == JsonValueKind.String &&
-            DateTimeOffset.TryParse(property.GetString(), out var parsed)
-                ? parsed
-                : null;
+        return ProviderJson.TryGetDateTimeOffset(element, propertyName);
     }
 
     private sealed record Endpoint(Uri BaseUri, string CsrfToken, string? Source = null);

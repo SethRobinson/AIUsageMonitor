@@ -453,7 +453,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                 if (document.RootElement.ValueKind == JsonValueKind.Object &&
                     document.RootElement.TryGetProperty("generatedAt", out var generatedAtElement) &&
                     generatedAtElement.ValueKind == JsonValueKind.String &&
-                    DateTimeOffset.TryParse(generatedAtElement.GetString(), out var generatedAt))
+                    ProviderJson.TryParseDateTimeOffset(generatedAtElement.GetString(), out var generatedAt))
                 {
                     exportUpdatedAt = generatedAt;
                 }
@@ -945,12 +945,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             return false;
         }
 
-        return property.ValueKind switch
-        {
-            JsonValueKind.Number => property.TryGetDouble(out value),
-            JsonValueKind.String => double.TryParse(property.GetString(), out value),
-            _ => false
-        };
+        return ProviderJson.TryGetDouble(element, propertyName, out value);
     }
 
     private static string? TryGetString(JsonElement element, string propertyName)
@@ -973,8 +968,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
 
         return resetElement.ValueKind switch
         {
-            JsonValueKind.Number => DateTimeOffset.FromUnixTimeSeconds(resetElement.GetInt64()),
-            JsonValueKind.String when DateTimeOffset.TryParse(resetElement.GetString(), out var parsed) => parsed,
+            JsonValueKind.Number when resetElement.TryGetInt64(out var unixSeconds) =>
+                DateTimeOffset.FromUnixTimeSeconds(unixSeconds),
+            JsonValueKind.String when ProviderJson.TryParseInt64(resetElement.GetString(), out var unixSeconds) =>
+                DateTimeOffset.FromUnixTimeSeconds(unixSeconds),
+            JsonValueKind.String when ProviderJson.TryParseDateTimeOffset(resetElement.GetString(), out var parsed) => parsed,
             _ => null
         };
     }
@@ -1005,12 +1003,12 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         var fiveHourMatch = FiveHourRegex().Match(text);
         var sevenDayMatch = SevenDayRegex().Match(text);
 
-        if (fiveHourMatch.Success && double.TryParse(fiveHourMatch.Groups["used"].Value, out var fiveHourUsed))
+        if (fiveHourMatch.Success && ProviderJson.TryParseDouble(fiveHourMatch.Groups["used"].Value, out var fiveHourUsed))
         {
             windows.Add(ProviderUsageFactory.PercentWindow("5h", fiveHourUsed, null));
         }
 
-        if (sevenDayMatch.Success && double.TryParse(sevenDayMatch.Groups["used"].Value, out var sevenDayUsed))
+        if (sevenDayMatch.Success && ProviderJson.TryParseDouble(sevenDayMatch.Groups["used"].Value, out var sevenDayUsed))
         {
             windows.Add(ProviderUsageFactory.PercentWindow("7d", sevenDayUsed, null));
         }

@@ -337,16 +337,10 @@ public sealed class GeminiUsageCollector : IUsageCollector
                     var title = windowElement.TryGetProperty("title", out var titleElement)
                         ? titleElement.GetString() ?? "Usage"
                         : "Usage";
-                    var usedPercent = windowElement.TryGetProperty("usedPercent", out var usedElement)
-                        ? usedElement.GetDouble()
+                    var usedPercent = ProviderJson.TryGetDouble(windowElement, "usedPercent", out var parsedUsedPercent)
+                        ? parsedUsedPercent
                         : 0;
-                    DateTimeOffset? resetAt = null;
-
-                    if (windowElement.TryGetProperty("resetAt", out var resetElement) &&
-                        DateTimeOffset.TryParse(resetElement.GetString(), out var parsedReset))
-                    {
-                        resetAt = parsedReset;
-                    }
+                    var resetAt = ProviderJson.TryGetDateTimeOffset(windowElement, "resetAt");
 
                     windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, resetAt));
                 }
@@ -445,8 +439,7 @@ public sealed class GeminiUsageCollector : IUsageCollector
 
     private static GeminiQuotaBucket? TryParseQuotaBucket(JsonElement element)
     {
-        if (!element.TryGetProperty("remainingFraction", out var fractionElement) ||
-            !fractionElement.TryGetDouble(out var remainingFraction))
+        if (!ProviderJson.TryGetDouble(element, "remainingFraction", out var remainingFraction))
         {
             return null;
         }
@@ -500,9 +493,7 @@ public sealed class GeminiUsageCollector : IUsageCollector
 
     private static string? TryGetString(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
-            ? property.GetString()
-            : null;
+        return ProviderJson.TryGetString(element, propertyName);
     }
 
     private static long? TryGetLong(JsonObject jsonObject, string propertyName)
@@ -517,18 +508,12 @@ public sealed class GeminiUsageCollector : IUsageCollector
     private static bool TryGetLong(JsonElement element, string propertyName, out long value)
     {
         value = 0;
-        return element.TryGetProperty(propertyName, out var property) &&
-            property.ValueKind == JsonValueKind.Number &&
-            property.TryGetInt64(out value);
+        return ProviderJson.TryGetInt64(element, propertyName, out value);
     }
 
     private static DateTimeOffset? TryGetDateTimeOffset(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out var property) &&
-            property.ValueKind == JsonValueKind.String &&
-            DateTimeOffset.TryParse(property.GetString(), out var parsed)
-                ? parsed
-                : null;
+        return ProviderJson.TryGetDateTimeOffset(element, propertyName);
     }
 
     private static bool IsCommandAvailable(string command)

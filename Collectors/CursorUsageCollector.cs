@@ -118,7 +118,7 @@ public sealed class CursorUsageCollector : IUsageCollector
 
         var monthlyBudgetDollars = settings.CursorIncludedBudgetDollars;
         if (string.IsNullOrWhiteSpace(settings.CursorApiKey) &&
-            double.TryParse(Environment.GetEnvironmentVariable("CURSOR_INCLUDED_BUDGET_DOLLARS"), out var parsedBudget))
+            ProviderJson.TryParseDouble(Environment.GetEnvironmentVariable("CURSOR_INCLUDED_BUDGET_DOLLARS"), out var parsedBudget))
         {
             monthlyBudgetDollars = parsedBudget;
         }
@@ -482,20 +482,7 @@ public sealed class CursorUsageCollector : IUsageCollector
 
     private static bool TryGetDouble(JsonElement element, string propertyName, out double value)
     {
-        value = 0;
-
-        if (!element.TryGetProperty(propertyName, out var property) ||
-            property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            return false;
-        }
-
-        return property.ValueKind switch
-        {
-            JsonValueKind.Number => property.TryGetDouble(out value),
-            JsonValueKind.String => double.TryParse(property.GetString(), out value),
-            _ => false
-        };
+        return ProviderJson.TryGetDouble(element, propertyName, out value);
     }
 
     private static bool TryGetObject(JsonElement element, string propertyName, out JsonElement property)
@@ -506,9 +493,7 @@ public sealed class CursorUsageCollector : IUsageCollector
 
     private static string? TryGetString(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
-            ? property.GetString()
-            : null;
+        return ProviderJson.TryGetString(element, propertyName);
     }
 
     private static bool? TryGetBool(JsonElement element, string propertyName)
@@ -542,55 +527,17 @@ public sealed class CursorUsageCollector : IUsageCollector
 
     private static DateTimeOffset? TryGetUnixMilliseconds(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
-        {
-            return null;
-        }
-
-        try
-        {
-            return property.ValueKind switch
-            {
-                JsonValueKind.Number when property.TryGetInt64(out var value) =>
-                    DateTimeOffset.FromUnixTimeMilliseconds(value),
-                JsonValueKind.String when long.TryParse(property.GetString(), out var value) =>
-                    DateTimeOffset.FromUnixTimeMilliseconds(value),
-                _ => null
-            };
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            return null;
-        }
+        return ProviderJson.TryGetUnixMilliseconds(element, propertyName);
     }
 
     private static DateTimeOffset? TryGetDateTimeOffset(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property) ||
-            property.ValueKind != JsonValueKind.String ||
-            !DateTimeOffset.TryParse(property.GetString(), out var parsed))
-        {
-            return null;
-        }
-
-        return parsed;
+        return ProviderJson.TryGetDateTimeOffset(element, propertyName);
     }
 
     private static DateTimeOffset? TryParseSubscriptionCycle(JsonElement root)
     {
-        if (!root.TryGetProperty("subscriptionCycleStart", out var cycleStartElement))
-        {
-            return null;
-        }
-
-        try
-        {
-            return DateTimeOffset.FromUnixTimeMilliseconds(cycleStartElement.GetInt64()).AddMonths(1);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            return null;
-        }
+        return ProviderJson.TryGetUnixMilliseconds(root, "subscriptionCycleStart")?.AddMonths(1);
     }
 
     internal interface ICursorDesktopAuthSource

@@ -295,70 +295,22 @@ public sealed class CodexLogUsageCollector : IUsageCollector
 
     private static string? TryGetString(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out var property) &&
-               property.ValueKind == JsonValueKind.String
-            ? property.GetString()
-            : null;
+        return ProviderJson.TryGetString(element, propertyName);
     }
 
     private static double? TryGetDouble(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
-        {
-            return null;
-        }
-
-        return property.ValueKind switch
-        {
-            JsonValueKind.Number when property.TryGetDouble(out var value) => value,
-            JsonValueKind.String when double.TryParse(
-                property.GetString(),
-                NumberStyles.Float,
-                CultureInfo.InvariantCulture,
-                out var value) => value,
-            _ => null
-        };
+        return ProviderJson.TryGetDouble(element, propertyName, out var value) ? value : null;
     }
 
     private static int? TryGetInt32(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
-        {
-            return null;
-        }
-
-        return property.ValueKind switch
-        {
-            JsonValueKind.Number when property.TryGetInt32(out var value) => value,
-            JsonValueKind.String when int.TryParse(
-                property.GetString(),
-                NumberStyles.Integer,
-                CultureInfo.InvariantCulture,
-                out var value) => value,
-            _ => null
-        };
+        return ProviderJson.TryGetInt32(element, propertyName, out var value) ? value : null;
     }
 
     private static DateTimeOffset? TryGetUnixSeconds(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
-        {
-            return null;
-        }
-
-        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var unixSeconds))
-        {
-            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
-        }
-
-        return property.ValueKind == JsonValueKind.String &&
-               long.TryParse(
-                   property.GetString(),
-                   NumberStyles.Integer,
-                   CultureInfo.InvariantCulture,
-                   out unixSeconds)
-            ? DateTimeOffset.FromUnixTimeSeconds(unixSeconds)
-            : null;
+        return ProviderJson.TryGetUnixSeconds(element, propertyName);
     }
 
     private static string WindowTitle(int windowMinutes)
