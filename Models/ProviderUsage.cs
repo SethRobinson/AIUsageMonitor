@@ -4,6 +4,8 @@ public sealed class ProviderUsage
 {
     public string Name { get; init; } = string.Empty;
 
+    public string SourceProviderName { get; init; } = string.Empty;
+
     public string PlanName { get; init; } = string.Empty;
 
     public string Source { get; init; } = string.Empty;

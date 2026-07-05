@@ -57,7 +57,7 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
     {
         Providers.Clear();
 
-        foreach (var provider in snapshot.Providers)
+        foreach (var provider in snapshot.Providers.SelectMany(ExpandDisplayProviders))
         {
             Providers.Add(new ProviderUsageCard(provider));
         }
@@ -70,16 +70,26 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
 
     public void ApplyProvider(ProviderUsage provider)
     {
-        var card = new ProviderUsageCard(provider);
-        var existingIndex = FindProviderIndex(provider.Name);
+        var cards = ExpandDisplayProviders(provider)
+            .Select(displayProvider => new ProviderUsageCard(displayProvider))
+            .ToList();
+        var existingIndex = FindFirstSourceProviderIndex(provider.Name);
 
         if (existingIndex >= 0)
         {
-            Providers[existingIndex] = card;
+            RemoveSourceProviderCards(provider.Name);
+            for (var index = 0; index < cards.Count; index++)
+            {
+                Providers.Insert(Math.Min(existingIndex + index, Providers.Count), cards[index]);
+            }
         }
         else
         {
-            Providers.Add(card);
+            foreach (var card in cards)
+            {
+                Providers.Add(card);
+            }
+
             OnPropertyChanged(nameof(HasProviders));
         }
 
@@ -136,31 +146,99 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
         }
     }
 
+    private static IEnumerable<ProviderUsage> ExpandDisplayProviders(ProviderUsage provider)
+    {
+        var sourceProviderName = string.IsNullOrWhiteSpace(provider.SourceProviderName)
+            ? provider.Name
+            : provider.SourceProviderName;
+        var baseWindows = provider.Windows
+            .Where(window => string.IsNullOrWhiteSpace(window.DisplayGroupName))
+            .ToList();
+
+        if (baseWindows.Count > 0 || provider.Windows.Count == 0)
+        {
+            yield return CloneDisplayProvider(provider, provider.Name, provider.PlanName, sourceProviderName, baseWindows);
+        }
+
+        foreach (var group in provider.Windows
+            .Where(window => !string.IsNullOrWhiteSpace(window.DisplayGroupName))
+            .GroupBy(window => window.DisplayGroupName.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            yield return CloneDisplayProvider(
+                provider,
+                FormatGroupedProviderName(provider.Name, group.Key),
+                string.Empty,
+                sourceProviderName,
+                group.ToList());
+        }
+    }
+
+    private static ProviderUsage CloneDisplayProvider(
+        ProviderUsage provider,
+        string name,
+        string planName,
+        string sourceProviderName,
+        List<UsageWindow> windows)
+    {
+        return new ProviderUsage
+        {
+            Name = name,
+            SourceProviderName = sourceProviderName,
+            PlanName = planName,
+            Source = provider.Source,
+            StatusMessage = provider.StatusMessage,
+            IsUnavailable = provider.IsUnavailable,
+            LastCheckedAt = provider.LastCheckedAt,
+            Windows = windows
+        };
+    }
+
+    private static string FormatGroupedProviderName(string providerName, string groupName)
+    {
+        if (groupName.StartsWith(providerName, StringComparison.OrdinalIgnoreCase))
+        {
+            return groupName;
+        }
+
+        return $"{providerName} {groupName}";
+    }
+
     private bool ProviderListChanged(IReadOnlyCollection<string> providerNames)
     {
-        if (Providers.Count != providerNames.Count)
+        var existingProviderNames = Providers
+            .Select(provider => provider.SourceProviderName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (existingProviderNames.Count != providerNames.Count)
         {
             return true;
         }
 
-        var existingProviderNames = Providers
-            .Select(provider => provider.ShortName)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
         return providerNames.Any(providerName => !existingProviderNames.Contains(providerName));
     }
 
-    private int FindProviderIndex(string providerName)
+    private int FindFirstSourceProviderIndex(string providerName)
     {
         for (var index = 0; index < Providers.Count; index++)
         {
-            if (string.Equals(Providers[index].ShortName, providerName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(Providers[index].SourceProviderName, providerName, StringComparison.OrdinalIgnoreCase))
             {
                 return index;
             }
         }
 
         return -1;
+    }
+
+    private void RemoveSourceProviderCards(string providerName)
+    {
+        for (var index = Providers.Count - 1; index >= 0; index--)
+        {
+            if (string.Equals(Providers[index].SourceProviderName, providerName, StringComparison.OrdinalIgnoreCase))
+            {
+                Providers.RemoveAt(index);
+            }
+        }
     }
 
     public void RefreshRelativeTimes()

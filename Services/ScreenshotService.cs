@@ -158,6 +158,7 @@ internal static class ScreenshotService
                 .Select(provider => new ProviderUsage
                 {
                     Name = provider.Name,
+                    SourceProviderName = provider.SourceProviderName,
                     PlanName = provider.PlanName,
                     Source = provider.Source,
                     StatusMessage = provider.StatusMessage,
@@ -167,11 +168,14 @@ internal static class ScreenshotService
                         .Select(window => new UsageWindow
                         {
                             Title = window.Title,
+                            DisplayGroupName = window.DisplayGroupName,
                             Limit = window.Limit,
                             Used = window.Used,
                             Remaining = window.Remaining,
+                            RemainingText = window.RemainingText,
                             ResetAt = RebaseTime(window.ResetAt, originalGeneratedAt, generatedAt),
                             Detail = window.Detail,
+                            HideReset = window.HideReset,
                             IsInactive = window.IsInactive
                         })
                         .ToList()
@@ -194,9 +198,11 @@ internal static class ScreenshotService
     {
         foreach (var provider in snapshot.Providers.Where(IsCheckingProvider))
         {
-            var card = viewModel.Providers.FirstOrDefault(candidate =>
-                string.Equals(candidate.ShortName, provider.Name, StringComparison.OrdinalIgnoreCase));
-            card?.SetChecking(true);
+            foreach (var card in viewModel.Providers.Where(candidate =>
+                string.Equals(candidate.SourceProviderName, provider.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                card.SetChecking(true);
+            }
         }
     }
 

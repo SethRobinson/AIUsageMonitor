@@ -82,4 +82,64 @@ public sealed class ProviderUsageCardTests
         Assert.AreEqual("No data", card.OverallStatusLabel);
         Assert.AreEqual(0d, card.PrimaryRemainingPercent);
     }
+
+    [TestMethod]
+    public void SupplementalDisplayGroupsRenderAsSeparateProviderCards()
+    {
+        var viewModel = new UsageOverlayViewModel();
+        var usage = new ProviderUsage
+        {
+            Name = "Anthropic",
+            PlanName = "Max 20x",
+            Source = "Test",
+            StatusMessage = "Test usage.",
+            LastCheckedAt = DateTimeOffset.Now,
+            Windows =
+            [
+                new UsageWindow
+                {
+                    Title = "5h",
+                    Limit = 100,
+                    Used = 18,
+                    Remaining = 82,
+                    ResetAt = DateTimeOffset.Now.AddHours(3)
+                },
+                new UsageWindow
+                {
+                    Title = "Fable",
+                    DisplayGroupName = "Fable",
+                    Limit = 100,
+                    Used = 100,
+                    Remaining = 0,
+                    ResetAt = DateTimeOffset.Now.AddHours(14)
+                },
+                new UsageWindow
+                {
+                    Title = "Extra usage",
+                    DisplayGroupName = "Fable",
+                    Limit = 50,
+                    Used = 10,
+                    Remaining = 40,
+                    RemainingText = "$10 of $50",
+                    Detail = "Monthly spend limit",
+                    HideReset = true
+                }
+            ]
+        };
+
+        viewModel.ApplyProvider(usage);
+
+        Assert.AreEqual(2, viewModel.Providers.Count);
+        Assert.AreEqual("Anthropic (Max 20x)", viewModel.Providers[0].Name);
+        Assert.AreEqual("Anthropic Fable", viewModel.Providers[1].Name);
+        Assert.IsTrue(viewModel.Providers.All(provider => provider.SourceProviderName == "Anthropic"));
+        Assert.AreEqual("Exhausted", viewModel.Providers[1].OverallStatusLabel);
+        Assert.AreEqual(2, viewModel.Providers[1].Windows.Count);
+        Assert.AreEqual("$10 of $50", viewModel.Providers[1].Windows.Single(window => window.Title == "Extra usage").RemainingText);
+
+        viewModel.SetChecking(["Anthropic"]);
+
+        Assert.AreEqual(2, viewModel.Providers.Count);
+        Assert.IsTrue(viewModel.Providers.All(provider => provider.SummaryText.Contains("checking", StringComparison.OrdinalIgnoreCase)));
+    }
 }

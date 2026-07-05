@@ -165,7 +165,39 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         var sonnet = usage.Windows.Single(window => window.Title == "Sonnet");
         Assert.AreEqual(2, sonnet.Used);
         Assert.AreEqual(sevenDayResetAt, sonnet.ResetAt);
+        Assert.AreEqual("Sonnet", sonnet.DisplayGroupName);
         Assert.AreEqual(1, handler.CallCount);
+    }
+
+    [TestMethod]
+    public async Task OAuthUsageParsesExtraUsageCreditsAsGroupedWindow()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        WriteClaudeCredentials(homeDirectory);
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            BuildOAuthUsageResponseWithExtraUsage(DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6)));
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var usage = await collector.CollectAsync(CancellationToken.None);
+
+        Assert.IsFalse(usage.IsUnavailable);
+        Assert.AreEqual("Claude OAuth usage endpoint", usage.Source);
+
+        var fable = usage.Windows.Single(window => window.Title == "Fable");
+        Assert.AreEqual("Fable", fable.Title);
+        Assert.AreEqual("Weekly model limit", fable.Detail);
+
+        var credits = usage.Windows.Single(window => window.Title == "Extra usage");
+        Assert.AreEqual("Extra usage", credits.Title);
+        Assert.AreEqual("Fable", credits.DisplayGroupName);
+        Assert.AreEqual(150, credits.Limit);
+        Assert.AreEqual(20.61, credits.Used);
+        Assert.AreEqual(129.39, credits.Remaining);
+        Assert.AreEqual("$20.61 of $150", credits.RemainingText);
+        Assert.AreEqual("Monthly spend limit", credits.Detail);
+        Assert.IsTrue(credits.HideReset);
     }
 
     [TestMethod]
@@ -262,6 +294,24 @@ public sealed class ClaudeStatusFileUsageCollectorTests
             """);
     }
 
+    private static void WriteClaudeCredentials(string homeDirectory)
+    {
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+
+        File.WriteAllText(
+            Path.Combine(claudeDirectory, ".credentials.json"),
+            """
+            {
+              "claudeAiOauth": {
+                "accessToken": "test-token",
+                "subscriptionType": "max",
+                "rateLimitTier": "max_20x"
+              }
+            }
+            """);
+    }
+
     private static void WriteClaudeProfileCache(string homeDirectory, string planName)
     {
         var claudeDirectory = Path.Combine(homeDirectory, ".claude");
@@ -320,6 +370,46 @@ public sealed class ClaudeStatusFileUsageCollectorTests
           "organization": {
             "organization_type": "claude_max",
             "rate_limit_tier": "{{rateLimitTier}}"
+          }
+        }
+        """;
+    }
+
+    private static string BuildOAuthUsageResponseWithExtraUsage(DateTimeOffset fiveHourResetAt, DateTimeOffset sevenDayResetAt)
+    {
+        return $$"""
+        {
+          "limits": [
+            {
+              "kind": "session",
+              "group": "session",
+              "percent": 15,
+              "resets_at": "{{fiveHourResetAt:O}}"
+            },
+            {
+              "kind": "weekly_all",
+              "group": "weekly",
+              "percent": 9,
+              "resets_at": "{{sevenDayResetAt:O}}"
+            },
+            {
+              "kind": "weekly_scoped",
+              "group": "weekly",
+              "percent": 100,
+              "resets_at": "{{sevenDayResetAt:O}}",
+              "scope": {
+                "model": {
+                  "display_name": "Fable"
+                }
+              }
+            }
+          ],
+          "extra_usage": {
+            "is_enabled": true,
+            "monthly_limit": 15000,
+            "used_credits": 2061,
+            "balance": 12061,
+            "currency": "USD"
           }
         }
         """;

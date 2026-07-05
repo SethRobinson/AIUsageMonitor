@@ -19,6 +19,24 @@
         "used": 12,
         "remaining": 88,
         "resetAt": "2026-05-23T02:05:00+09:00"
+      },
+      {
+        "title": "Fable",
+        "displayGroupName": "Fable",
+        "limit": 100,
+        "used": 100,
+        "remaining": 0,
+        "resetAt": "2026-05-23T15:30:00+09:00"
+      },
+      {
+        "title": "Extra usage",
+        "displayGroupName": "Fable",
+        "limit": 50,
+        "used": 10,
+        "remaining": 40,
+        "remainingText": "$10 of $50",
+        "detail": "Monthly spend limit",
+        "hideReset": true
       }
       ]
     },

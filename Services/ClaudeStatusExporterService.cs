@@ -149,6 +149,7 @@ function Format-Left($label, $window) {
 try {
     $data = $inputJson | ConvertFrom-Json
     $rateLimits = Get-Prop $data 'rate_limits'
+    $extraUsage = Get-FirstProp $data @('extra_usage', 'extraUsage')
     $subscriptionType = Get-FirstProp $data @('subscriptionType', 'subscription_type')
     $rateLimitTier = Get-FirstProp $data @('rateLimitTier', 'rate_limit_tier')
     if ($null -eq $rateLimitTier) {
@@ -177,6 +178,7 @@ try {
         rateLimitTier = $rateLimitTier
         session_id = Get-Prop $data 'session_id'
         rate_limits = $rateLimits
+        extra_usage = $extraUsage
     }
 
     $export | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath $outputPath -Encoding UTF8

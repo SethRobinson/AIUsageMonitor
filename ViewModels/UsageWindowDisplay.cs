@@ -35,15 +35,19 @@ public sealed class UsageWindowDisplay
 
         var status = UsageStatus.FromRemainingPercent(usageWindow.RemainingPercent);
 
-        RemainingText = $"{usageWindow.RemainingPercent:0}% left";
+        RemainingText = string.IsNullOrWhiteSpace(usageWindow.RemainingText)
+            ? $"{usageWindow.RemainingPercent:0}% left"
+            : usageWindow.RemainingText;
         LimitText = string.IsNullOrWhiteSpace(Detail) ? RemainingText : Detail;
-        ResetText = usageWindow.ResetAt is { } resetAt
+        ResetText = usageWindow.HideReset
+            ? string.Empty
+            : usageWindow.ResetAt is { } resetAt
             ? FormatResetText(resetAt)
             : FormatMissingResetText(usageWindow);
-        ResetRelativeText = usageWindow.ResetAt is { } relativeResetAt
+        ResetRelativeText = !usageWindow.HideReset && usageWindow.ResetAt is { } relativeResetAt
             ? FormatResetRelativeText(relativeResetAt)
             : string.Empty;
-        ResetRelativeBrush = usageWindow.ResetAt is { } relativeBrushResetAt
+        ResetRelativeBrush = !usageWindow.HideReset && usageWindow.ResetAt is { } relativeBrushResetAt
             ? ResetRelativeBrushFor(relativeBrushResetAt)
             : UsageBrushes.FrozenBrush("#A8AFBA");
         StatusLabel = status.Label;

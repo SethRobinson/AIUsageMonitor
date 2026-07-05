@@ -18,13 +18,19 @@ internal static class ProviderUsageFactory
         };
     }
 
-    public static UsageWindow PercentWindow(string title, double usedPercent, DateTimeOffset? resetAt, string detail = "")
+    public static UsageWindow PercentWindow(
+        string title,
+        double usedPercent,
+        DateTimeOffset? resetAt,
+        string detail = "",
+        string displayGroupName = "")
     {
         var used = Math.Clamp(usedPercent, 0, 100);
 
         return new UsageWindow
         {
             Title = title,
+            DisplayGroupName = displayGroupName,
             Limit = 100,
             Used = used,
             Remaining = Math.Max(100 - used, 0),

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -403,11 +404,13 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             {
                 AddClaudeWindow(windows, rateLimits, "five_hour", "5h");
                 AddClaudeWindow(windows, rateLimits, "seven_day", "7d");
+                AddExtraUsageWindow(windows, root);
             }
             else
             {
                 AddClaudeWindow(windows, root, "five_hour", "5h");
                 AddClaudeWindow(windows, root, "seven_day", "7d");
+                AddExtraUsageWindow(windows, root);
             }
 
             if (windows.Count == 0)
@@ -628,7 +631,8 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                 AddOAuthLimitWindows(windows, root);
                 AddOAuthWindowIfMissing(windows, root, "five_hour", "5h");
                 AddOAuthWindowIfMissing(windows, root, "seven_day", "7d");
-                AddOAuthWindowIfMissing(windows, root, "seven_day_sonnet", "Sonnet");
+                AddOAuthWindowIfMissing(windows, root, "seven_day_sonnet", "Sonnet", "Sonnet", "Weekly model limit");
+                AddExtraUsageWindow(windows, root);
             }
             catch (Exception ex) when (ex is JsonException or InvalidOperationException)
             {
@@ -704,7 +708,13 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         return null;
     }
 
-    private static void AddOAuthWindow(List<UsageWindow> windows, JsonElement root, string propertyName, string title)
+    private static void AddOAuthWindow(
+        List<UsageWindow> windows,
+        JsonElement root,
+        string propertyName,
+        string title,
+        string displayGroupName = "",
+        string detail = "")
     {
         if (!root.TryGetProperty(propertyName, out var window) ||
             window.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
@@ -720,17 +730,28 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
 
         var resetAt = TryGetResetAt(window);
 
-        windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, NormalizeResetAt(usedPercent, resetAt)));
+        windows.Add(ProviderUsageFactory.PercentWindow(
+            title,
+            usedPercent,
+            NormalizeResetAt(usedPercent, resetAt),
+            detail,
+            displayGroupName));
     }
 
-    private static void AddOAuthWindowIfMissing(List<UsageWindow> windows, JsonElement root, string propertyName, string title)
+    private static void AddOAuthWindowIfMissing(
+        List<UsageWindow> windows,
+        JsonElement root,
+        string propertyName,
+        string title,
+        string displayGroupName = "",
+        string detail = "")
     {
         if (windows.Any(window => string.Equals(window.Title, title, StringComparison.OrdinalIgnoreCase)))
         {
             return;
         }
 
-        AddOAuthWindow(windows, root, propertyName, title);
+        AddOAuthWindow(windows, root, propertyName, title, displayGroupName, detail);
     }
 
     private static void AddOAuthLimitWindows(List<UsageWindow> windows, JsonElement root)
@@ -750,30 +771,35 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                 continue;
             }
 
-            var title = GetOAuthLimitTitle(limit);
-            if (string.IsNullOrWhiteSpace(title))
+            var display = GetOAuthLimitDisplay(limit);
+            if (string.IsNullOrWhiteSpace(display.Title))
             {
                 continue;
             }
 
             var resetAt = TryGetResetAt(limit);
-            windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, NormalizeResetAt(usedPercent, resetAt)));
+            windows.Add(ProviderUsageFactory.PercentWindow(
+                display.Title,
+                usedPercent,
+                NormalizeResetAt(usedPercent, resetAt),
+                display.Detail,
+                display.GroupName));
         }
     }
 
-    private static string GetOAuthLimitTitle(JsonElement limit)
+    private static OAuthLimitDisplay GetOAuthLimitDisplay(JsonElement limit)
     {
         var kind = TryGetString(limit, "kind");
         var group = TryGetString(limit, "group");
         if (string.Equals(kind, "session", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(group, "session", StringComparison.OrdinalIgnoreCase))
         {
-            return "5h";
+            return new OAuthLimitDisplay("5h");
         }
 
         if (string.Equals(kind, "weekly_all", StringComparison.OrdinalIgnoreCase))
         {
-            return "7d";
+            return new OAuthLimitDisplay("7d");
         }
 
         if (string.Equals(kind, "weekly_scoped", StringComparison.OrdinalIgnoreCase))
@@ -781,10 +807,112 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             var modelName = limit.TryGetProperty("scope", out var scope)
                 ? TryFindStringProperty(scope, "display_name")
                 : null;
-            return PlanNameFormatter.Format(modelName);
+            var title = PlanNameFormatter.Format(modelName);
+            return string.IsNullOrWhiteSpace(title)
+                ? new OAuthLimitDisplay(string.Empty)
+                : new OAuthLimitDisplay(title, title, "Weekly model limit");
         }
 
-        return string.Empty;
+        return new OAuthLimitDisplay(string.Empty);
+    }
+
+    private static void AddExtraUsageWindow(List<UsageWindow> windows, JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("extra_usage", out var extraUsage) ||
+            extraUsage.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        if (extraUsage.TryGetProperty("is_enabled", out var enabledElement) &&
+            enabledElement.ValueKind == JsonValueKind.False)
+        {
+            return;
+        }
+
+        var currency = TryGetString(extraUsage, "currency") ?? "USD";
+        if (!TryGetDouble(extraUsage, "monthly_limit", out var rawLimit) &&
+            !TryGetDouble(extraUsage, "limit", out rawLimit) &&
+            !TryGetDouble(extraUsage, "spend_limit", out rawLimit))
+        {
+            return;
+        }
+
+        var limit = NormalizeCreditAmount(rawLimit, currency);
+        if (limit <= 0)
+        {
+            return;
+        }
+
+        var hasUsed = TryGetDouble(extraUsage, "used_credits", out var rawUsed) ||
+            TryGetDouble(extraUsage, "used", out rawUsed) ||
+            TryGetDouble(extraUsage, "usage", out rawUsed) ||
+            TryGetDouble(extraUsage, "spent", out rawUsed);
+
+        double used;
+        if (hasUsed)
+        {
+            used = NormalizeCreditAmount(rawUsed, currency);
+        }
+        else if (TryGetDouble(extraUsage, "utilization", out var utilization))
+        {
+            var usedRatio = utilization <= 1 ? utilization : utilization / 100;
+            used = Math.Clamp(usedRatio, 0, 1) * limit;
+        }
+        else if (TryGetDouble(extraUsage, "remaining_credits", out var rawRemaining))
+        {
+            var remainingCredits = NormalizeCreditAmount(rawRemaining, currency);
+            used = Math.Max(limit - remainingCredits, 0);
+        }
+        else
+        {
+            return;
+        }
+
+        used = Math.Clamp(used, 0, limit);
+        var remaining = Math.Max(limit - used, 0);
+
+        windows.Add(new UsageWindow
+        {
+            Title = "Extra usage",
+            DisplayGroupName = GetExtraUsageDisplayGroup(windows),
+            Limit = limit,
+            Used = used,
+            Remaining = remaining,
+            RemainingText = $"{FormatCreditAmount(used, currency)} of {FormatCreditAmount(limit, currency)}",
+            Detail = "Monthly spend limit",
+            HideReset = true
+        });
+    }
+
+    private static string GetExtraUsageDisplayGroup(IEnumerable<UsageWindow> windows)
+    {
+        return windows
+            .Select(window => window.DisplayGroupName)
+            .FirstOrDefault(groupName => !string.IsNullOrWhiteSpace(groupName)) ?? "Credits";
+    }
+
+    private static double NormalizeCreditAmount(double amount, string currency)
+    {
+        return UsesMinorCurrencyUnit(currency) ? amount / 100 : amount;
+    }
+
+    private static bool UsesMinorCurrencyUnit(string currency)
+    {
+        return !string.Equals(currency, "JPY", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(currency, "KRW", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FormatCreditAmount(double amount, string currency)
+    {
+        var rounded = Math.Round(amount, 2);
+        var format = Math.Abs(rounded - Math.Round(rounded)) < 0.005 ? "0" : "0.00";
+        var value = rounded.ToString(format, CultureInfo.InvariantCulture);
+
+        return string.Equals(currency, "USD", StringComparison.OrdinalIgnoreCase)
+            ? "$" + value
+            : $"{value} {currency.ToUpperInvariant()}";
     }
 
     private static void AddClaudeWindow(List<UsageWindow> windows, JsonElement container, string propertyName, string title)
@@ -1067,6 +1195,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         return new ProviderUsage
         {
             Name = usage.Name,
+            SourceProviderName = usage.SourceProviderName,
             PlanName = usage.PlanName,
             Source = usage.Source,
             StatusMessage = usage.StatusMessage + " " + note,
@@ -1121,6 +1250,8 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         public static OAuthUsageReadResult PlanOnly(string livePlanName) =>
             new(null, false, livePlanName);
     }
+
+    private sealed record OAuthLimitDisplay(string Title, string GroupName = "", string Detail = "");
 
     private sealed record ClaudeAccount(string? AccessToken, string PlanName);
 

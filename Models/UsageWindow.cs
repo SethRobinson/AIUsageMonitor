@@ -6,15 +6,21 @@ public sealed class UsageWindow
 {
     public string Title { get; init; } = string.Empty;
 
+    public string DisplayGroupName { get; init; } = string.Empty;
+
     public double Limit { get; init; } = 100;
 
     public double Used { get; init; }
 
     public double? Remaining { get; init; }
 
+    public string RemainingText { get; init; } = string.Empty;
+
     public DateTimeOffset? ResetAt { get; init; }
 
     public string Detail { get; init; } = string.Empty;
+
+    public bool HideReset { get; init; }
 
     /// <summary>
     /// True when this model family has no usable quota on the current account/plan — e.g. a free

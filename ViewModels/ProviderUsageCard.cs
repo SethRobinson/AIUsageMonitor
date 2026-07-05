@@ -14,6 +14,9 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
     public ProviderUsageCard(ProviderUsage usage)
     {
         ShortName = string.IsNullOrWhiteSpace(usage.Name) ? "Provider" : usage.Name.Trim();
+        SourceProviderName = string.IsNullOrWhiteSpace(usage.SourceProviderName)
+            ? ShortName
+            : usage.SourceProviderName.Trim();
         Name = FormatDisplayName(ShortName, usage.PlanName);
         Source = usage.Source;
         StatusMessage = usage.StatusMessage;
@@ -48,6 +51,8 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
     public string Name { get; }
 
     public string ShortName { get; }
+
+    public string SourceProviderName { get; }
 
     public string Source { get; }
 
