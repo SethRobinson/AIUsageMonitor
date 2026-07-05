@@ -19,6 +19,7 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         SourceProviderName = string.IsNullOrWhiteSpace(usage.SourceProviderName)
             ? ShortName
             : usage.SourceProviderName.Trim();
+        ConstrainedShortName = GetConstrainedShortName(ShortName, SourceProviderName);
         Name = FormatDisplayName(ShortName, usage.PlanName);
         Source = usage.Source;
         StatusMessage = usage.StatusMessage;
@@ -53,9 +54,11 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         _compactSummaryText = usage.IsUnavailable || activeWindows.Count == 0 || string.IsNullOrWhiteSpace(BalanceSummaryText)
             ? _summaryText
             : $"{BalanceSummaryText} - {ShortName}";
-        _miniSummaryText = usage.IsUnavailable || activeWindows.Count == 0 || string.IsNullOrWhiteSpace(BalanceSummaryText)
-            ? _summaryText
-            : BalanceSummaryText;
+        _miniSummaryText = usage.IsUnavailable || activeWindows.Count == 0
+            ? $"{ConstrainedShortName} - {GetUnavailableSummary(usage.StatusMessage)}"
+            : !string.IsNullOrWhiteSpace(BalanceSummaryText)
+            ? BalanceSummaryText
+            : $"{ConstrainedShortName} - {PrimaryRemainingPercent:0}%";
         RefreshCheckedText();
     }
 
@@ -66,6 +69,8 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
     public string ShortName { get; }
 
     public string SourceProviderName { get; }
+
+    public string ConstrainedShortName { get; }
 
     public string Source { get; }
 
@@ -109,7 +114,7 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
 
     public string CompactSummaryText => IsChecking ? $"{ShortName} - checking" : _compactSummaryText;
 
-    public string MiniSummaryText => IsChecking ? $"{ShortName} - checking" : _miniSummaryText;
+    public string MiniSummaryText => IsChecking ? $"{ConstrainedShortName} - checking" : _miniSummaryText;
 
     public MediaBrush SummaryProgressBrush { get; }
 
@@ -176,6 +181,19 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         }
 
         return $"{providerName} ({planName})";
+    }
+
+    private static string GetConstrainedShortName(string providerName, string sourceProviderName)
+    {
+        if (string.IsNullOrWhiteSpace(sourceProviderName) ||
+            string.Equals(providerName, sourceProviderName, StringComparison.OrdinalIgnoreCase) ||
+            !providerName.StartsWith(sourceProviderName, StringComparison.OrdinalIgnoreCase))
+        {
+            return providerName;
+        }
+
+        var suffix = providerName[sourceProviderName.Length..].Trim();
+        return string.IsNullOrWhiteSpace(suffix) ? providerName : suffix;
     }
 
     private static string GetUnavailableSummary(string statusMessage)

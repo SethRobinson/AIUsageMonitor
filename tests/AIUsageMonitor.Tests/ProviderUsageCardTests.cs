@@ -170,6 +170,8 @@ public sealed class ProviderUsageCardTests
         Assert.AreEqual(2, viewModel.Providers.Count);
         Assert.AreEqual("Anthropic (Max 20x)", viewModel.Providers[0].Name);
         Assert.AreEqual("Anthropic Fable", viewModel.Providers[1].Name);
+        Assert.AreEqual("Fable", viewModel.Providers[1].ConstrainedShortName);
+        Assert.AreEqual("Fable - 0%", viewModel.Providers[1].MiniSummaryText);
         Assert.IsTrue(viewModel.Providers.All(provider => provider.SourceProviderName == "Anthropic"));
         Assert.AreEqual("Exhausted", viewModel.Providers[1].OverallStatusLabel);
         Assert.AreEqual(2, viewModel.Providers[1].Windows.Count);
@@ -179,5 +181,6 @@ public sealed class ProviderUsageCardTests
 
         Assert.AreEqual(2, viewModel.Providers.Count);
         Assert.IsTrue(viewModel.Providers.All(provider => provider.SummaryText.Contains("checking", StringComparison.OrdinalIgnoreCase)));
+        Assert.AreEqual("Fable - checking", viewModel.Providers[1].MiniSummaryText);
     }
 }
