@@ -38,7 +38,8 @@ public sealed class ClaudeStatusFileUsageCollectorTests
             homeDirectory,
             DateTimeOffset.Now,
             subscriptionType: "max",
-            rateLimitTier: "max_5x");
+            rateLimitTier: "max_5x",
+            includePlanInStatusExport: true);
         var handler = new QueueHttpMessageHandler(
             (HttpStatusCode.OK, BuildOAuthProfileResponse("default_claude_max_20x")),
             (HttpStatusCode.OK, BuildOAuthUsageResponse(fiveHourResetAt, sevenDayResetAt)));
@@ -61,7 +62,8 @@ public sealed class ClaudeStatusFileUsageCollectorTests
             homeDirectory,
             DateTimeOffset.Now,
             subscriptionType: "max",
-            rateLimitTier: "max_5x");
+            rateLimitTier: "max_5x",
+            includePlanInStatusExport: true);
         var handler = new QueueHttpMessageHandler(
             (HttpStatusCode.OK, BuildOAuthProfileResponse("default_claude_max_20x")),
             (HttpStatusCode.OK, BuildOAuthUsageResponse(DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6))));
@@ -82,6 +84,29 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         Assert.AreEqual("Max 20x", startupUsage.PlanName);
         StringAssert.Contains(startupUsage.StatusMessage, "local status output");
         Assert.AreEqual(0, restartHandler.CallCount);
+    }
+
+    [TestMethod]
+    public async Task CachedOAuthProfilePlanOverridesFreshStatusLineTier()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        WriteClaudeCredentialsAndStatusExport(
+            homeDirectory,
+            DateTimeOffset.Now,
+            subscriptionType: "max",
+            rateLimitTier: "max_5x",
+            includePlanInStatusExport: true);
+        WriteClaudeProfileCache(homeDirectory, "Max 20x");
+        var handler = new StubHttpMessageHandler(HttpStatusCode.TooManyRequests);
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var usage = await collector.CollectAsync(CancellationToken.None);
+
+        Assert.IsFalse(usage.IsUnavailable);
+        Assert.AreEqual("Max 20x", usage.PlanName);
+        StringAssert.Contains(usage.StatusMessage, "local status output");
+        Assert.AreEqual(0, handler.CallCount);
     }
 
     [TestMethod]
@@ -191,7 +216,8 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         double sevenDayUsedPercent = 17,
         DateTimeOffset? sevenDayResetAt = null,
         string subscriptionType = "pro",
-        string rateLimitTier = "default")
+        string rateLimitTier = "default",
+        bool includePlanInStatusExport = false)
     {
         var claudeDirectory = Path.Combine(homeDirectory, ".claude");
         Directory.CreateDirectory(claudeDirectory);
@@ -210,11 +236,18 @@ public sealed class ClaudeStatusFileUsageCollectorTests
 
         fiveHourResetAt ??= DateTimeOffset.Now.AddHours(1);
         sevenDayResetAt ??= DateTimeOffset.Now.AddHours(1);
+        var statusPlanFields = includePlanInStatusExport
+            ? $$"""
+              "subscriptionType": "{{subscriptionType}}",
+              "rateLimitTier": "{{rateLimitTier}}",
+            """
+            : string.Empty;
         File.WriteAllText(
             Path.Combine(claudeDirectory, "ai-usage-monitor-usage.json"),
             $$"""
             {
               "generatedAt": "{{generatedAt:O}}",
+            {{statusPlanFields}}
               "rate_limits": {
                 "five_hour": {
                   "used_percentage": {{fiveHourUsedPercent}},
@@ -225,6 +258,20 @@ public sealed class ClaudeStatusFileUsageCollectorTests
                   "resets_at": {{sevenDayResetAt.Value.ToUnixTimeSeconds()}}
                 }
               }
+            }
+            """);
+    }
+
+    private static void WriteClaudeProfileCache(string homeDirectory, string planName)
+    {
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+        File.WriteAllText(
+            Path.Combine(claudeDirectory, "ai-usage-monitor-profile.json"),
+            $$"""
+            {
+              "planName": "{{planName}}",
+              "cachedAt": "{{DateTimeOffset.Now:O}}"
             }
             """);
     }

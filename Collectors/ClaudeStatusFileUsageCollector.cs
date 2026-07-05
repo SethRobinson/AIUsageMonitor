@@ -78,7 +78,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             planName = ResolvePlanName(account, cachedPlanName);
         }
 
-        var localUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
+        var localUsage = TryReadLocalUsage(
+            candidatePaths,
+            planName,
+            PreferResolvedPlanName(cachedPlanName),
+            cancellationToken);
 
         if (localUsage.FreshUsage is not null && !forceRefresh)
         {
@@ -100,7 +104,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             if (RememberLivePlanName(oauthUsage.LivePlanName, profileCachePath, ref cachedPlanName))
             {
                 planName = ResolvePlanName(account, cachedPlanName);
-                localUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
+                localUsage = TryReadLocalUsage(
+                    candidatePaths,
+                    planName,
+                    PreferResolvedPlanName(cachedPlanName),
+                    cancellationToken);
             }
 
             if (oauthUsage.Usage is not null && !oauthUsage.Usage.IsUnavailable)
@@ -136,18 +144,17 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             var refreshResult = await CliQuotaRefreshRunner.RefreshClaudeAsync(cancellationToken);
             account = TryReadClaudeAccount(credentialsPath);
             planName = ResolvePlanName(account, cachedPlanName);
-            var refreshedLocalUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
+            var refreshedLocalUsage = TryReadLocalUsage(
+                candidatePaths,
+                planName,
+                PreferResolvedPlanName(cachedPlanName),
+                cancellationToken);
             now = DateTimeOffset.Now;
 
             if (refreshResult.Succeeded)
             {
                 _nextCommandRefreshAt = now.Add(CommandSuccessCooldown);
                 _commandRefreshPauseMessage = string.Empty;
-                if (RememberLivePlanName(account?.PlanName ?? string.Empty, profileCachePath, ref cachedPlanName))
-                {
-                    planName = ResolvePlanName(account, cachedPlanName);
-                    refreshedLocalUsage = TryReadLocalUsage(candidatePaths, planName, cancellationToken);
-                }
 
                 if (refreshedLocalUsage.FreshUsage is not null)
                 {
@@ -233,6 +240,12 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             : cachedPlanName;
     }
 
+    private bool PreferResolvedPlanName(string cachedPlanName)
+    {
+        return !string.IsNullOrWhiteSpace(_livePlanName) ||
+            !string.IsNullOrWhiteSpace(cachedPlanName);
+    }
+
     private bool RememberLivePlanName(string livePlanName, string profileCachePath, ref string cachedPlanName)
     {
         if (string.IsNullOrWhiteSpace(livePlanName) ||
@@ -293,6 +306,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     private static LocalUsageReadResult TryReadLocalUsage(
         IReadOnlyList<string> candidatePaths,
         string planName,
+        bool preferResolvedPlanName,
         CancellationToken cancellationToken)
     {
         ProviderUsage? freshLocalUsage = null;
@@ -311,7 +325,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
 
             var text = File.ReadAllText(path);
             var usage = path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
-                ? TryParseJson(text, path, planName)
+                ? TryParseJson(text, path, planName, preferResolvedPlanName)
                 : TryParseText(text, path, planName);
 
             if (!IsFreshLocalExport(path, text, out var exportUpdatedAt))
@@ -367,7 +381,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         }
     }
 
-    private static ProviderUsage? TryParseJson(string text, string path, string fallbackPlanName)
+    private static ProviderUsage? TryParseJson(
+        string text,
+        string path,
+        string fallbackPlanName,
+        bool preferFallbackPlanName)
     {
         try
         {
@@ -378,7 +396,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                 return null;
             }
 
-            var planName = TryGetClaudePlanName(root, fallbackPlanName);
+            var planName = TryGetClaudePlanName(root, fallbackPlanName, preferFallbackPlanName);
             var windows = new List<UsageWindow>();
 
             if (root.TryGetProperty("rate_limits", out var rateLimits))
@@ -884,8 +902,17 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         };
     }
 
-    private static string TryGetClaudePlanName(JsonElement root, string fallbackPlanName)
+    private static string TryGetClaudePlanName(
+        JsonElement root,
+        string fallbackPlanName,
+        bool preferFallbackPlanName = false)
     {
+        if (preferFallbackPlanName &&
+            !string.IsNullOrWhiteSpace(fallbackPlanName))
+        {
+            return fallbackPlanName;
+        }
+
         var planName = TryGetClaudePlanName(root);
         if (!string.IsNullOrWhiteSpace(planName))
         {
