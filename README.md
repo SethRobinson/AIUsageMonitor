@@ -14,7 +14,7 @@ Settings let you pick the refresh interval, UI scale, which providers appear, wh
 
 # Download #
 
-Current version: V1.09, latest updated July 5, 2026.
+Current version: V1.10, latest updated July 5, 2026.
 
 **[Download for Windows - Code signed by me, Seth A. Robinson](https://rtsoft.com/files/SethsAIUsageMonitor-win-x64.zip)**
 
