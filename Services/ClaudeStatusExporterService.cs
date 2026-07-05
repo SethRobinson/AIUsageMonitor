@@ -149,6 +149,7 @@ function Format-Left($label, $window) {
 try {
     $data = $inputJson | ConvertFrom-Json
     $rateLimits = Get-Prop $data 'rate_limits'
+    $limits = Get-FirstProp $data @('limits', 'usage_limits', 'usageLimits')
     $extraUsage = Get-FirstProp $data @('extra_usage', 'extraUsage')
     $subscriptionType = Get-FirstProp $data @('subscriptionType', 'subscription_type')
     $rateLimitTier = Get-FirstProp $data @('rateLimitTier', 'rate_limit_tier')
@@ -163,7 +164,7 @@ try {
 
     $status = 'ok'
     $message = 'Claude quota exported from status line.'
-    if ($null -eq $rateLimits) {
+    if ($null -eq $rateLimits -and $null -eq $limits) {
         $status = 'missing_rate_limits'
         $message = 'Claude status line ran, but rate_limits was absent. It appears only for Claude.ai subscribers after the first API response.'
     }
@@ -178,6 +179,7 @@ try {
         rateLimitTier = $rateLimitTier
         session_id = Get-Prop $data 'session_id'
         rate_limits = $rateLimits
+        limits = $limits
         extra_usage = $extraUsage
     }
 

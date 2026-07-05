@@ -13,8 +13,10 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     private const string ExportName = "ai-usage-monitor-usage.json";
     private const string LegacyExportName = "apimonitor-usage.json";
     private const string ProfileCacheName = "ai-usage-monitor-profile.json";
+    private const string OAuthUsageCacheName = "ai-usage-monitor-oauth-usage-cache.json";
     private const string ExporterScriptName = "ai-usage-monitor-statusline.ps1";
     private static readonly TimeSpan LocalExportMaxAge = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan OAuthUsageCacheMaxAge = TimeSpan.FromHours(12);
     private static readonly TimeSpan PassedResetStaleGrace = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan CommandSuccessCooldown = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan CommandFailureBackoff = TimeSpan.FromMinutes(10);
@@ -59,9 +61,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         var claudeDirectory = Path.Combine(home, ".claude");
         var credentialsPath = Path.Combine(claudeDirectory, ".credentials.json");
         var profileCachePath = Path.Combine(claudeDirectory, ProfileCacheName);
+        var oauthUsageCachePath = Path.Combine(claudeDirectory, OAuthUsageCacheName);
         var account = TryReadClaudeAccount(credentialsPath);
         var cachedPlanName = TryReadCachedPlanName(profileCachePath);
         var planName = ResolvePlanName(account, cachedPlanName);
+        var cachedOAuthUsage = TryReadCachedOAuthUsage(oauthUsageCachePath, planName);
         var candidatePaths = new[]
         {
             Path.Combine(claudeDirectory, ExportName),
@@ -85,9 +89,13 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             PreferResolvedPlanName(cachedPlanName),
             cancellationToken);
 
-        if (localUsage.FreshUsage is not null && !forceRefresh)
+        var shouldCollectSupplementalUsage = localUsage.FreshUsage is not null &&
+            !forceRefresh &&
+            ShouldCollectSupplementalOAuth(localUsage.FreshUsage, planName, cachedOAuthUsage);
+
+        if (localUsage.FreshUsage is not null && !forceRefresh && !shouldCollectSupplementalUsage)
         {
-            return localUsage.FreshUsage;
+            return MergeCachedSupplementalUsage(localUsage.FreshUsage, cachedOAuthUsage);
         }
 
         var statusNotes = new List<string>();
@@ -110,10 +118,12 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                     planName,
                     PreferResolvedPlanName(cachedPlanName),
                     cancellationToken);
+                cachedOAuthUsage = TryReadCachedOAuthUsage(oauthUsageCachePath, planName);
             }
 
             if (oauthUsage.Usage is not null && !oauthUsage.Usage.IsUnavailable)
             {
+                TryWriteCachedOAuthUsage(oauthUsageCachePath, oauthUsage.Usage);
                 if (!forceRefresh ||
                     !string.IsNullOrWhiteSpace(oauthUsage.LivePlanName) ||
                     !string.IsNullOrWhiteSpace(_livePlanName))
@@ -138,7 +148,8 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             return WithStatusNote(localUsage.FreshUsage, "Plan checked from Claude OAuth usage endpoint.");
         }
 
-        if ((forceRefresh || _nextCommandRefreshAt <= now) &&
+        if (localUsage.FreshUsage is null &&
+            (forceRefresh || _nextCommandRefreshAt <= now) &&
             (!oauthPaused || forceRefresh) &&
             (!oauthUsage.IsRateLimited || forceRefresh))
         {
@@ -182,7 +193,8 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
 
         if (localUsage.FreshUsage is not null)
         {
-            return WithStatusNote(localUsage.FreshUsage, string.Join(" ", statusNotes));
+            var usage = MergeCachedSupplementalUsage(localUsage.FreshUsage, cachedOAuthUsage);
+            return WithStatusNote(usage, string.Join(" ", statusNotes));
         }
 
         if (oauthUsage.Usage is not null && !oauthUsage.Usage.IsUnavailable)
@@ -304,6 +316,163 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         }
     }
 
+    private static ProviderUsage? TryReadCachedOAuthUsage(string usageCachePath, string fallbackPlanName)
+    {
+        try
+        {
+            if (!File.Exists(usageCachePath))
+            {
+                return null;
+            }
+
+            var cache = JsonSerializer.Deserialize<ClaudeOAuthUsageCache>(
+                File.ReadAllText(usageCachePath),
+                ProfileCacheJsonOptions);
+
+            if (cache?.Usage is null ||
+                !IsCachedOAuthUsageFresh(cache, DateTimeOffset.Now))
+            {
+                return null;
+            }
+
+            return string.IsNullOrWhiteSpace(cache.Usage.PlanName) &&
+                !string.IsNullOrWhiteSpace(fallbackPlanName)
+                    ? CloneProviderWithWindows(cache.Usage, cache.Usage.Windows, fallbackPlanName)
+                    : cache.Usage;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static void TryWriteCachedOAuthUsage(string usageCachePath, ProviderUsage usage)
+    {
+        try
+        {
+            if (!HasSupplementalWindows(usage))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(usageCachePath) ?? ".");
+            var cache = new ClaudeOAuthUsageCache
+            {
+                CachedAt = DateTimeOffset.Now,
+                Usage = usage
+            };
+            File.WriteAllText(usageCachePath, JsonSerializer.Serialize(cache, ProfileCacheJsonOptions));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static bool IsCachedOAuthUsageFresh(ClaudeOAuthUsageCache cache, DateTimeOffset now)
+    {
+        if (now - cache.CachedAt.ToLocalTime() > OAuthUsageCacheMaxAge)
+        {
+            return false;
+        }
+
+        return GetFreshSupplementalWindows(cache.Usage, now).Count > 0;
+    }
+
+    private static bool ShouldCollectSupplementalOAuth(
+        ProviderUsage localUsage,
+        string planName,
+        ProviderUsage? cachedOAuthUsage)
+    {
+        if (localUsage.IsUnavailable ||
+            localUsage.Windows.Count == 0 ||
+            HasSupplementalWindows(localUsage))
+        {
+            return false;
+        }
+
+        return IsClaudeMaxPlan(planName) || HasSupplementalWindows(cachedOAuthUsage);
+    }
+
+    private static ProviderUsage MergeCachedSupplementalUsage(ProviderUsage usage, ProviderUsage? cachedOAuthUsage)
+    {
+        if (HasSupplementalWindows(usage))
+        {
+            return usage;
+        }
+
+        var supplementalWindows = GetFreshSupplementalWindows(cachedOAuthUsage, DateTimeOffset.Now);
+        if (supplementalWindows.Count == 0)
+        {
+            return usage;
+        }
+
+        var windows = usage.Windows
+            .Concat(supplementalWindows)
+            .ToList();
+        var statusMessage = usage.StatusMessage.Contains("Supplemental model usage", StringComparison.OrdinalIgnoreCase)
+            ? usage.StatusMessage
+            : usage.StatusMessage + " Supplemental model usage is from the last successful Claude OAuth usage check.";
+
+        return new ProviderUsage
+        {
+            Name = usage.Name,
+            SourceProviderName = usage.SourceProviderName,
+            PlanName = string.IsNullOrWhiteSpace(usage.PlanName) ? cachedOAuthUsage?.PlanName ?? string.Empty : usage.PlanName,
+            Source = usage.Source,
+            StatusMessage = statusMessage,
+            IsUnavailable = usage.IsUnavailable,
+            LastCheckedAt = usage.LastCheckedAt,
+            Windows = windows
+        };
+    }
+
+    private static List<UsageWindow> GetFreshSupplementalWindows(ProviderUsage? usage, DateTimeOffset now)
+    {
+        return usage?.Windows
+            .Where(window => IsSupplementalWindow(window) && IsSupplementalWindowFresh(window, now))
+            .ToList() ?? [];
+    }
+
+    private static bool HasSupplementalWindows(ProviderUsage? usage)
+    {
+        return usage?.Windows.Any(IsSupplementalWindow) == true;
+    }
+
+    private static bool IsSupplementalWindow(UsageWindow window)
+    {
+        return !string.IsNullOrWhiteSpace(window.DisplayGroupName);
+    }
+
+    private static bool IsSupplementalWindowFresh(UsageWindow window, DateTimeOffset now)
+    {
+        return window.HideReset ||
+            window.ResetAt is null ||
+            window.ResetAt.Value.ToLocalTime() > now.Subtract(PassedResetStaleGrace);
+    }
+
+    private static bool IsClaudeMaxPlan(string planName)
+    {
+        return planName.Contains("Max", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static ProviderUsage CloneProviderWithWindows(
+        ProviderUsage usage,
+        IEnumerable<UsageWindow> windows,
+        string planName)
+    {
+        return new ProviderUsage
+        {
+            Name = usage.Name,
+            SourceProviderName = usage.SourceProviderName,
+            PlanName = planName,
+            Source = usage.Source,
+            StatusMessage = usage.StatusMessage,
+            IsUnavailable = usage.IsUnavailable,
+            LastCheckedAt = usage.LastCheckedAt,
+            Windows = windows.ToList()
+        };
+    }
+
     private static LocalUsageReadResult TryReadLocalUsage(
         IReadOnlyList<string> candidatePaths,
         string planName,
@@ -400,18 +569,20 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             var planName = TryGetClaudePlanName(root, fallbackPlanName, preferFallbackPlanName);
             var windows = new List<UsageWindow>();
 
+            AddOAuthLimitWindows(windows, root);
+
             if (root.TryGetProperty("rate_limits", out var rateLimits))
             {
-                AddClaudeWindow(windows, rateLimits, "five_hour", "5h");
-                AddClaudeWindow(windows, rateLimits, "seven_day", "7d");
-                AddExtraUsageWindow(windows, root);
+                AddClaudeWindowIfMissing(windows, rateLimits, "five_hour", "5h");
+                AddClaudeWindowIfMissing(windows, rateLimits, "seven_day", "7d");
             }
             else
             {
-                AddClaudeWindow(windows, root, "five_hour", "5h");
-                AddClaudeWindow(windows, root, "seven_day", "7d");
-                AddExtraUsageWindow(windows, root);
+                AddClaudeWindowIfMissing(windows, root, "five_hour", "5h");
+                AddClaudeWindowIfMissing(windows, root, "seven_day", "7d");
             }
+
+            AddExtraUsageWindow(windows, root);
 
             if (windows.Count == 0)
             {
@@ -935,6 +1106,16 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         windows.Add(ProviderUsageFactory.PercentWindow(title, usedPercent, resetAt));
     }
 
+    private static void AddClaudeWindowIfMissing(List<UsageWindow> windows, JsonElement container, string propertyName, string title)
+    {
+        if (windows.Any(window => string.Equals(window.Title, title, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        AddClaudeWindow(windows, container, propertyName, title);
+    }
+
     private static bool TryGetDouble(JsonElement element, string propertyName, out double value)
     {
         value = 0;
@@ -1258,6 +1439,13 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         public string PlanName { get; init; } = string.Empty;
 
         public DateTimeOffset CachedAt { get; init; }
+    }
+
+    private sealed class ClaudeOAuthUsageCache
+    {
+        public DateTimeOffset CachedAt { get; init; }
+
+        public ProviderUsage? Usage { get; init; }
     }
 
     private enum StaleLocalExportReason

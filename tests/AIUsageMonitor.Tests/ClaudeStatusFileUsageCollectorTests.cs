@@ -29,6 +29,30 @@ public sealed class ClaudeStatusFileUsageCollectorTests
     }
 
     [TestMethod]
+    public async Task FreshMaxLocalStatusExportCollectsOAuthScopedModelCard()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        WriteClaudeCredentialsAndStatusExport(
+            homeDirectory,
+            DateTimeOffset.Now,
+            subscriptionType: "max",
+            rateLimitTier: "max_20x");
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            BuildOAuthUsageResponseWithExtraUsage(DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6)));
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var usage = await collector.CollectAsync(CancellationToken.None);
+
+        Assert.IsFalse(usage.IsUnavailable);
+        Assert.AreEqual("Claude OAuth usage endpoint", usage.Source);
+        Assert.AreEqual(1, handler.CallCount);
+        Assert.AreEqual("Fable", usage.Windows.Single(window => window.Title == "Fable").DisplayGroupName);
+        Assert.AreEqual("Fable", usage.Windows.Single(window => window.Title == "Extra usage").DisplayGroupName);
+    }
+
+    [TestMethod]
     public async Task ManualRefreshUsesLiveOAuthPlanTierWhenLocalStatusIsFresh()
     {
         var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
@@ -83,7 +107,7 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         Assert.IsFalse(startupUsage.IsUnavailable);
         Assert.AreEqual("Max 20x", startupUsage.PlanName);
         StringAssert.Contains(startupUsage.StatusMessage, "local status output");
-        Assert.AreEqual(0, restartHandler.CallCount);
+        Assert.AreEqual(1, restartHandler.CallCount);
     }
 
     [TestMethod]
@@ -106,7 +130,7 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         Assert.IsFalse(usage.IsUnavailable);
         Assert.AreEqual("Max 20x", usage.PlanName);
         StringAssert.Contains(usage.StatusMessage, "local status output");
-        Assert.AreEqual(0, handler.CallCount);
+        Assert.AreEqual(1, handler.CallCount);
     }
 
     [TestMethod]
@@ -201,6 +225,64 @@ public sealed class ClaudeStatusFileUsageCollectorTests
     }
 
     [TestMethod]
+    public async Task FreshLocalStatusExportWithLimitsPreservesScopedModelCardBeforeOAuth()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        var fiveHourResetAt = DateTimeOffset.Now.AddHours(3);
+        var sevenDayResetAt = DateTimeOffset.Now.AddDays(6);
+        WriteClaudeCredentials(homeDirectory);
+        WriteClaudeStatusExportWithLimitsAndExtraUsage(homeDirectory, DateTimeOffset.Now, fiveHourResetAt, sevenDayResetAt);
+        var handler = new StubHttpMessageHandler(HttpStatusCode.TooManyRequests);
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var usage = await collector.CollectAsync(CancellationToken.None);
+
+        Assert.IsFalse(usage.IsUnavailable);
+        StringAssert.Contains(usage.StatusMessage, "local status output");
+        Assert.AreEqual(0, handler.CallCount);
+
+        var fable = usage.Windows.Single(window => window.Title == "Fable");
+        Assert.AreEqual("Fable", fable.DisplayGroupName);
+        Assert.AreEqual("Weekly model limit", fable.Detail);
+        Assert.AreEqual(100, fable.Used);
+
+        var credits = usage.Windows.Single(window => window.Title == "Extra usage");
+        Assert.AreEqual("Fable", credits.DisplayGroupName);
+        Assert.AreEqual("$20.61 of $150", credits.RemainingText);
+    }
+
+    [TestMethod]
+    public async Task CachedOAuthScopedModelCardSurvivesBaseOnlyLocalStatusWhenOAuthIsRateLimited()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        WriteClaudeCredentials(homeDirectory);
+        var handler = new QueueHttpMessageHandler(
+            (HttpStatusCode.OK, BuildOAuthUsageResponseWithExtraUsage(DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6))),
+            (HttpStatusCode.TooManyRequests, string.Empty));
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var oauthUsage = await collector.CollectAsync(CancellationToken.None);
+        Assert.AreEqual("Fable", oauthUsage.Windows.Single(window => window.Title == "Fable").DisplayGroupName);
+
+        WriteClaudeCredentialsAndStatusExport(
+            homeDirectory,
+            DateTimeOffset.Now,
+            subscriptionType: "max",
+            rateLimitTier: "max_20x");
+
+        var mergedUsage = await collector.CollectAsync(CancellationToken.None);
+
+        Assert.IsFalse(mergedUsage.IsUnavailable);
+        StringAssert.Contains(mergedUsage.StatusMessage, "local status output");
+        StringAssert.Contains(mergedUsage.StatusMessage, "last successful Claude OAuth usage check");
+        Assert.AreEqual(2, handler.CallCount);
+        Assert.AreEqual("Fable", mergedUsage.Windows.Single(window => window.Title == "Fable").DisplayGroupName);
+        Assert.AreEqual("Fable", mergedUsage.Windows.Single(window => window.Title == "Extra usage").DisplayGroupName);
+    }
+
+    [TestMethod]
     public async Task LocalStatusExportWithNullRateLimitsDoesNotThrow()
     {
         // The status-line exporter writes "rate_limits": null when Claude Code has not
@@ -289,6 +371,56 @@ public sealed class ClaudeStatusFileUsageCollectorTests
                   "used_percentage": {{sevenDayUsedPercent}},
                   "resets_at": {{sevenDayResetAt.Value.ToUnixTimeSeconds()}}
                 }
+              }
+            }
+            """);
+    }
+
+    private static void WriteClaudeStatusExportWithLimitsAndExtraUsage(
+        string homeDirectory,
+        DateTimeOffset generatedAt,
+        DateTimeOffset fiveHourResetAt,
+        DateTimeOffset sevenDayResetAt)
+    {
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+        File.WriteAllText(
+            Path.Combine(claudeDirectory, "ai-usage-monitor-usage.json"),
+            $$"""
+            {
+              "generatedAt": "{{generatedAt:O}}",
+              "source": "Claude Code statusLine",
+              "status": "ok",
+              "limits": [
+                {
+                  "kind": "session",
+                  "group": "session",
+                  "percent": 15,
+                  "resets_at": "{{fiveHourResetAt:O}}"
+                },
+                {
+                  "kind": "weekly_all",
+                  "group": "weekly",
+                  "percent": 9,
+                  "resets_at": "{{sevenDayResetAt:O}}"
+                },
+                {
+                  "kind": "weekly_scoped",
+                  "group": "weekly",
+                  "percent": 100,
+                  "resets_at": "{{sevenDayResetAt:O}}",
+                  "scope": {
+                    "model": {
+                      "display_name": "Fable"
+                    }
+                  }
+                }
+              ],
+              "extra_usage": {
+                "is_enabled": true,
+                "monthly_limit": 15000,
+                "used_credits": 2061,
+                "currency": "USD"
               }
             }
             """);
