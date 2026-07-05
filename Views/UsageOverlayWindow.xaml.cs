@@ -67,6 +67,12 @@ public partial class UsageOverlayWindow : Window
         typeof(UsageOverlayWindow),
         new PropertyMetadata(400d));
 
+    public static readonly DependencyProperty CardSlotHeightProperty = DependencyProperty.Register(
+        nameof(CardSlotHeight),
+        typeof(double),
+        typeof(UsageOverlayWindow),
+        new PropertyMetadata(250d));
+
     public static readonly DependencyProperty ProvidersListWidthProperty = DependencyProperty.Register(
         nameof(ProvidersListWidth),
         typeof(double),
@@ -221,6 +227,12 @@ public partial class UsageOverlayWindow : Window
     {
         get => (double)GetValue(CardSlotWidthProperty);
         private set => SetValue(CardSlotWidthProperty, value);
+    }
+
+    public double CardSlotHeight
+    {
+        get => (double)GetValue(CardSlotHeightProperty);
+        private set => SetValue(CardSlotHeightProperty, value);
     }
 
     public double ProvidersListWidth
@@ -508,6 +520,11 @@ public partial class UsageOverlayWindow : Window
         var rows = providerCount > 0 ? (int)Math.Ceiling(providerCount / (double)columns) : 1;
         var cellWidth = columns > 0 ? availableWidth / columns : availableWidth;
         var cellHeight = rows > 0 ? availableHeight / rows : availableHeight;
+        if (Math.Abs(CardSlotHeight - cellHeight) > 0.001)
+        {
+            CardSlotHeight = cellHeight;
+        }
+
         var detailLevel = GetCardDetailLevel(cellWidth, cellHeight);
         if (!string.Equals(CardDetailLevel, detailLevel, StringComparison.Ordinal))
         {
@@ -515,7 +532,7 @@ public partial class UsageOverlayWindow : Window
         }
 
         // Grow the card content as the cell gets bigger so large tiles read like a full dashboard
-        // panel. Width-limited (Min) so the scaled-up bars/text never overflow the card.
+        // panel. Each provider card caps this by row count so dense cards do not clip vertically.
         var contentScale = Math.Clamp(
             Math.Min(cellWidth / CardScaleBaseWidth, cellHeight / CardScaleBaseHeight),
             1d,
