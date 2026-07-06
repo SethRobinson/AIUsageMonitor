@@ -322,6 +322,48 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         Assert.AreEqual(0, usage.Windows.Count);
     }
 
+    [TestMethod]
+    public async Task CachedOAuthUsageIsUsedWhenCredentialsAreEmptyAndStatusLineHasNoLimits()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        WriteEmptyClaudeCredentials(homeDirectory);
+        WriteClaudeStatusExportWithoutLimits(homeDirectory, DateTimeOffset.Now);
+        WriteLegacyClaudeStatusExport(homeDirectory, DateTimeOffset.Now.AddDays(-50));
+        WriteCachedOAuthUsage(homeDirectory, DateTimeOffset.Now, DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6));
+        var handler = new StubHttpMessageHandler(HttpStatusCode.OK, BuildOAuthUsageResponse(DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6)));
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var usage = await collector.CollectAsync(CancellationToken.None);
+
+        Assert.IsFalse(usage.IsUnavailable);
+        Assert.AreEqual("Max 20x", usage.PlanName);
+        Assert.AreEqual("Claude OAuth usage endpoint cache", usage.Source);
+        StringAssert.Contains(usage.StatusMessage, "last successful Claude OAuth usage check");
+        Assert.IsFalse(usage.StatusMessage.Contains("stale", StringComparison.OrdinalIgnoreCase));
+        Assert.AreEqual(4, usage.Windows.Count);
+        Assert.AreEqual(0, handler.CallCount);
+    }
+
+    [TestMethod]
+    public async Task FreshMissingLimitsStatusBeatsStaleLegacyExport()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        WriteClaudeCredentials(homeDirectory);
+        WriteClaudeStatusExportWithoutLimits(homeDirectory, DateTimeOffset.Now);
+        WriteLegacyClaudeStatusExport(homeDirectory, DateTimeOffset.Now.AddDays(-50));
+        var handler = new StubHttpMessageHandler(HttpStatusCode.TooManyRequests);
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+
+        var usage = await collector.CollectAsync(CancellationToken.None);
+
+        Assert.IsTrue(usage.IsUnavailable);
+        StringAssert.Contains(usage.StatusMessage, "rate_limits was absent");
+        Assert.IsFalse(usage.StatusMessage.Contains("stale", StringComparison.OrdinalIgnoreCase));
+        Assert.AreEqual(1, handler.CallCount);
+    }
+
     private static void WriteClaudeCredentialsAndStatusExport(
         string homeDirectory,
         DateTimeOffset generatedAt,
@@ -371,6 +413,108 @@ public sealed class ClaudeStatusFileUsageCollectorTests
                   "used_percentage": {{sevenDayUsedPercent}},
                   "resets_at": {{sevenDayResetAt.Value.ToUnixTimeSeconds()}}
                 }
+              }
+            }
+            """);
+    }
+
+    private static void WriteEmptyClaudeCredentials(string homeDirectory)
+    {
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+        File.WriteAllText(Path.Combine(claudeDirectory, ".credentials.json"), "{}");
+    }
+
+    private static void WriteClaudeStatusExportWithoutLimits(string homeDirectory, DateTimeOffset generatedAt)
+    {
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+        File.WriteAllText(
+            Path.Combine(claudeDirectory, "ai-usage-monitor-usage.json"),
+            $$"""
+            {
+              "generatedAt": "{{generatedAt:O}}",
+              "source": "Claude Code statusLine",
+              "status": "missing_rate_limits",
+              "statusMessage": "Claude status line ran, but rate_limits was absent.",
+              "rate_limits": null,
+              "limits": null
+            }
+            """);
+    }
+
+    private static void WriteLegacyClaudeStatusExport(string homeDirectory, DateTimeOffset generatedAt)
+    {
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+        File.WriteAllText(
+            Path.Combine(claudeDirectory, "apimonitor-usage.json"),
+            $$"""
+            {
+              "generatedAt": "{{generatedAt:O}}",
+              "rate_limits": {
+                "five_hour": {
+                  "used_percentage": 99,
+                  "resets_at": {{DateTimeOffset.Now.AddHours(1).ToUnixTimeSeconds()}}
+                }
+              }
+            }
+            """);
+    }
+
+    private static void WriteCachedOAuthUsage(
+        string homeDirectory,
+        DateTimeOffset cachedAt,
+        DateTimeOffset fiveHourResetAt,
+        DateTimeOffset sevenDayResetAt)
+    {
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+        File.WriteAllText(
+            Path.Combine(claudeDirectory, "ai-usage-monitor-oauth-usage-cache.json"),
+            $$"""
+            {
+              "CachedAt": "{{cachedAt:O}}",
+              "Usage": {
+                "Name": "Anthropic",
+                "PlanName": "Max 20x",
+                "Source": "Claude OAuth usage endpoint",
+                "StatusMessage": "Claude Max 20x quota from local Claude Code OAuth credentials.",
+                "Windows": [
+                  {
+                    "Title": "5h",
+                    "Limit": 100,
+                    "Used": 12,
+                    "Remaining": 88,
+                    "ResetAt": "{{fiveHourResetAt:O}}"
+                  },
+                  {
+                    "Title": "7d",
+                    "Limit": 100,
+                    "Used": 54,
+                    "Remaining": 46,
+                    "ResetAt": "{{sevenDayResetAt:O}}"
+                  },
+                  {
+                    "Title": "Fable",
+                    "DisplayGroupName": "Fable",
+                    "Limit": 100,
+                    "Used": 100,
+                    "Remaining": 0,
+                    "ResetAt": "{{sevenDayResetAt:O}}",
+                    "Detail": "Weekly model limit"
+                  },
+                  {
+                    "Title": "Extra usage",
+                    "DisplayGroupName": "Fable",
+                    "Limit": 150,
+                    "Used": 29.39,
+                    "Remaining": 120.61,
+                    "RemainingText": "$29.39 of $150",
+                    "Detail": "Monthly spend limit",
+                    "HideReset": true
+                  }
+                ]
               }
             }
             """);

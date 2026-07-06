@@ -148,6 +148,13 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             return WithStatusNote(localUsage.FreshUsage, "Plan checked from Claude OAuth usage endpoint.");
         }
 
+        if (!forceRefresh &&
+            localUsage.FreshUsage is null &&
+            cachedOAuthUsage is not null)
+        {
+            return CreateCachedOAuthFallback(cachedOAuthUsage, string.Join(" ", statusNotes));
+        }
+
         if (localUsage.FreshUsage is null &&
             (forceRefresh || _nextCommandRefreshAt <= now) &&
             (!oauthPaused || forceRefresh) &&
@@ -200,6 +207,16 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         if (oauthUsage.Usage is not null && !oauthUsage.Usage.IsUnavailable)
         {
             return WithStatusNote(oauthUsage.Usage, string.Join(" ", statusNotes));
+        }
+
+        if (cachedOAuthUsage is not null)
+        {
+            return CreateCachedOAuthFallback(cachedOAuthUsage, string.Join(" ", statusNotes));
+        }
+
+        if (localUsage.FreshUnavailableUsage is not null)
+        {
+            return WithStatusNote(localUsage.FreshUnavailableUsage, string.Join(" ", statusNotes));
         }
 
         if (localUsage.StaleExport is not null)
@@ -330,15 +347,23 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                 ProfileCacheJsonOptions);
 
             if (cache?.Usage is null ||
-                !IsCachedOAuthUsageFresh(cache, DateTimeOffset.Now))
+                DateTimeOffset.Now - cache.CachedAt.ToLocalTime() > OAuthUsageCacheMaxAge)
             {
                 return null;
             }
 
-            return string.IsNullOrWhiteSpace(cache.Usage.PlanName) &&
+            var freshWindows = GetFreshCachedWindows(cache.Usage, DateTimeOffset.Now);
+            if (freshWindows.Count == 0)
+            {
+                return null;
+            }
+
+            var planName = string.IsNullOrWhiteSpace(cache.Usage.PlanName) &&
                 !string.IsNullOrWhiteSpace(fallbackPlanName)
-                    ? CloneProviderWithWindows(cache.Usage, cache.Usage.Windows, fallbackPlanName)
-                    : cache.Usage;
+                    ? fallbackPlanName
+                    : cache.Usage.PlanName;
+
+            return CloneProviderWithWindows(cache.Usage, freshWindows, planName);
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
@@ -368,14 +393,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         }
     }
 
-    private static bool IsCachedOAuthUsageFresh(ClaudeOAuthUsageCache cache, DateTimeOffset now)
+    private static List<UsageWindow> GetFreshCachedWindows(ProviderUsage usage, DateTimeOffset now)
     {
-        if (now - cache.CachedAt.ToLocalTime() > OAuthUsageCacheMaxAge)
-        {
-            return false;
-        }
-
-        return GetFreshSupplementalWindows(cache.Usage, now).Count > 0;
+        return usage.Windows
+            .Where(window => IsCachedWindowFresh(window, now))
+            .ToList();
     }
 
     private static bool ShouldCollectSupplementalOAuth(
@@ -429,7 +451,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     private static List<UsageWindow> GetFreshSupplementalWindows(ProviderUsage? usage, DateTimeOffset now)
     {
         return usage?.Windows
-            .Where(window => IsSupplementalWindow(window) && IsSupplementalWindowFresh(window, now))
+            .Where(window => IsSupplementalWindow(window) && IsCachedWindowFresh(window, now))
             .ToList() ?? [];
     }
 
@@ -443,7 +465,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         return !string.IsNullOrWhiteSpace(window.DisplayGroupName);
     }
 
-    private static bool IsSupplementalWindowFresh(UsageWindow window, DateTimeOffset now)
+    private static bool IsCachedWindowFresh(UsageWindow window, DateTimeOffset now)
     {
         return window.HideReset ||
             window.ResetAt is null ||
@@ -480,6 +502,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         CancellationToken cancellationToken)
     {
         ProviderUsage? freshLocalUsage = null;
+        ProviderUsage? freshUnavailableUsage = null;
         ProviderUsage? staleLocalUsage = null;
         StaleLocalExport? staleLocalExport = null;
         var now = DateTimeOffset.Now;
@@ -531,9 +554,14 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                 freshLocalUsage = usage;
                 break;
             }
+
+            if (usage is not null && usage.IsUnavailable)
+            {
+                freshUnavailableUsage ??= usage;
+            }
         }
 
-        return new LocalUsageReadResult(freshLocalUsage, staleLocalUsage, staleLocalExport);
+        return new LocalUsageReadResult(freshLocalUsage, freshUnavailableUsage, staleLocalUsage, staleLocalExport);
     }
 
     private static void TrackStaleLocalExport(
@@ -1384,6 +1412,28 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         };
     }
 
+    private static ProviderUsage CreateCachedOAuthFallback(ProviderUsage usage, string note)
+    {
+        const string fallbackNote = "Showing last successful Claude OAuth usage check because fresh Claude quota data was not available.";
+        var statusNote = string.IsNullOrWhiteSpace(note)
+            ? fallbackNote
+            : fallbackNote + " " + note;
+
+        return new ProviderUsage
+        {
+            Name = usage.Name,
+            SourceProviderName = usage.SourceProviderName,
+            PlanName = usage.PlanName,
+            Source = string.IsNullOrWhiteSpace(usage.Source)
+                ? "Cached Claude OAuth usage endpoint"
+                : usage.Source + " cache",
+            StatusMessage = usage.StatusMessage + " " + statusNote,
+            IsUnavailable = usage.IsUnavailable,
+            LastCheckedAt = usage.LastCheckedAt,
+            Windows = usage.Windows
+        };
+    }
+
     private void PauseCommandRefresh(DateTimeOffset retryAt, string message)
     {
         _nextCommandRefreshAt = retryAt <= DateTimeOffset.Now
@@ -1410,6 +1460,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
 
     private sealed record LocalUsageReadResult(
         ProviderUsage? FreshUsage,
+        ProviderUsage? FreshUnavailableUsage,
         ProviderUsage? StaleUsage,
         StaleLocalExport? StaleExport);
 
