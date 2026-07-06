@@ -164,6 +164,10 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Style.Triggers>
+                <!-- The hover popup only adds information when the card is too small to show it all. -->
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Full">
+                    <Setter Property="ToolTipService.IsEnabled" Value="False" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compact">
                     <Setter Property="Margin" Value="4" />
                     <Setter Property="Padding" Value="8" />
@@ -241,6 +245,34 @@
                                     Background="{TemplateBinding Foreground}"
                                     CornerRadius="5" />
                         </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ProviderCardToolTipStyle" TargetType="{x:Type ToolTip}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HasDropShadow" Value="False" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ToolTip}">
+                        <Border Margin="8"
+                                Padding="16"
+                                Background="#FF1D2028"
+                                BorderBrush="#4A5361"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="14"
+                                                  Direction="270"
+                                                  ShadowDepth="3"
+                                                  Opacity="0.45"
+                                                  Color="#000000" />
+                            </Border.Effect>
+                            <ContentPresenter />
+                        </Border>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -459,7 +491,131 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Style="{StaticResource ProviderCardStyle}">
+                                <Border Style="{StaticResource ProviderCardStyle}"
+                                        ToolTipService.InitialShowDelay="300"
+                                        ToolTipService.BetweenShowDelay="100"
+                                        ToolTipService.ShowDuration="3600000">
+                                    <Border.ToolTip>
+                                        <ToolTip Style="{StaticResource ProviderCardToolTipStyle}">
+                                            <StackPanel MinWidth="300"
+                                                        MaxWidth="380">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Border Width="4"
+                                                            Height="28"
+                                                            Margin="0,0,12,0"
+                                                            VerticalAlignment="Center"
+                                                            Background="{Binding AccentBrush}"
+                                                            CornerRadius="2" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Name}"
+                                                               Margin="0,0,12,0"
+                                                               Foreground="#F3F4F6"
+                                                               FontSize="16"
+                                                               FontWeight="SemiBold"
+                                                               TextWrapping="Wrap"
+                                                               VerticalAlignment="Center" />
+                                                    <StackPanel Grid.Column="2"
+                                                                HorizontalAlignment="Right"
+                                                                VerticalAlignment="Top">
+                                                        <Border Padding="9,4"
+                                                                HorizontalAlignment="Right"
+                                                                Background="{Binding OverallStatusBackground}"
+                                                                CornerRadius="8">
+                                                            <TextBlock Text="{Binding OverallStatusLabel}"
+                                                                       Foreground="{Binding OverallStatusBrush}"
+                                                                       FontSize="12"
+                                                                       FontWeight="SemiBold" />
+                                                        </Border>
+                                                        <TextBlock Margin="0,6,0,0"
+                                                                   Text="{Binding CheckedText}"
+                                                                   Foreground="#8B93A1"
+                                                                   FontSize="11"
+                                                                   HorizontalAlignment="Right" />
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <TextBlock Text="{Binding StatusMessage}"
+                                                           Margin="0,12,0,0"
+                                                           Foreground="#A8AFBA"
+                                                           FontSize="13"
+                                                           TextWrapping="Wrap"
+                                                           Visibility="{Binding IsUnavailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                                                <ItemsControl Margin="0,12,0,0"
+                                                              ItemsSource="{Binding Windows}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel Margin="0,0,0,14">
+                                                                <Grid>
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Text="{Binding Title}"
+                                                                               Foreground="#D6DAE1"
+                                                                               FontSize="13"
+                                                                               FontWeight="SemiBold" />
+                                                                    <TextBlock Grid.Column="1"
+                                                                               Margin="12,0,0,0"
+                                                                               Text="{Binding RemainingText}"
+                                                                               Foreground="#F9FAFB"
+                                                                               FontSize="13"
+                                                                               FontWeight="SemiBold" />
+                                                                </Grid>
+
+                                                                <ProgressBar Margin="0,7,0,0"
+                                                                             Height="9"
+                                                                             Value="{Binding RemainingPercent, Mode=OneWay}"
+                                                                             Foreground="{Binding ProgressBrush}">
+                                                                    <ProgressBar.Style>
+                                                                        <Style TargetType="{x:Type ProgressBar}"
+                                                                               BasedOn="{StaticResource UsageProgressBarStyle}">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding ShowsProgress}" Value="False">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </ProgressBar.Style>
+                                                                </ProgressBar>
+
+                                                                <Grid Margin="0,7,0,0">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Text="{Binding LimitText}"
+                                                                               Margin="0,0,12,0"
+                                                                               Foreground="#A8AFBA"
+                                                                               FontSize="12"
+                                                                               TextWrapping="Wrap" />
+                                                                    <StackPanel Grid.Column="1"
+                                                                                Orientation="Horizontal"
+                                                                                HorizontalAlignment="Right"
+                                                                                VerticalAlignment="Top">
+                                                                        <TextBlock Text="{Binding ResetRelativeText}"
+                                                                                   Foreground="{Binding ResetRelativeBrush}"
+                                                                                   FontSize="12"
+                                                                                   FontWeight="SemiBold" />
+                                                                        <TextBlock Text="{Binding ResetText}"
+                                                                                   Margin="10,0,0,0"
+                                                                                   Foreground="#A8AFBA"
+                                                                                   FontSize="12" />
+                                                                    </StackPanel>
+                                                                </Grid>
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </ToolTip>
+                                    </Border.ToolTip>
                                     <Grid>
                                         <Grid.LayoutTransform>
                                             <ScaleTransform>
