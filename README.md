@@ -12,9 +12,13 @@ Settings let you pick the refresh interval, UI scale, which providers appear, wh
 
 ![Settings dialog](docs/screenshot-settings.png)
 
+Monitor multiple Claude accounts side by side, each with its own overlay card, and switch which account the claude CLI uses with one click:
+
+![Claude accounts dialog](docs/screenshot-accounts.png)
+
 # Download #
 
-Current version: V1.13, latest updated July 6, 2026.
+Current version: V1.14, latest updated July 8, 2026.
 
 **[Download for Windows - Code signed by me, Seth A. Robinson](https://rtsoft.com/files/SethsAIUsageMonitor-win-x64.zip)**
 
@@ -28,6 +32,7 @@ This is app was stupid easy to make, so you have a need for it, you undoubtely c
 
 - Always-on-top overlay with percentage remaining, reset times, plan names, and per-provider last checked status.
 - Supports Anthropic, OpenAI/Codex, Antigravity, Gemini, and Cursor local usage checks.
+- Multiple Claude accounts: add extra accounts in Settings (each logs in with the official claude CLI into its own config folder), monitor them side by side, and switch which account the claude CLI uses with one click.
 - Tray controls for show/hide, refresh now, settings, logs, and exit.
 - Layout adjusts as you drag the size to fit more or less info, UI scale slider in its Settings
 - Provider errors go to copyable logs and use backoff to avoid hammering services.

@@ -15,6 +15,9 @@ public sealed class UsageAggregatorService
     private readonly AppSettingsService _settingsService;
     private readonly Dictionary<string, CollectorFailureState> _failureStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _failureStateLock = new();
+    private readonly ClaudeStatusFileUsageCollector? _defaultAnthropicCollector;
+    private readonly Dictionary<string, AccountCollectorEntry> _anthropicAccountCollectors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _accountCollectorLock = new();
 
     public UsageAggregatorService(
         AppLogService logService,
@@ -23,9 +26,17 @@ public sealed class UsageAggregatorService
     {
         _logService = logService;
         _settingsService = settingsService;
-        _collectors = collectors ??
+
+        if (collectors is not null)
+        {
+            _collectors = collectors;
+            return;
+        }
+
+        _defaultAnthropicCollector = new ClaudeStatusFileUsageCollector();
+        _collectors =
         [
-            new ClaudeStatusFileUsageCollector(),
+            _defaultAnthropicCollector,
             new AnthropicApiCreditsCollector(settingsService),
             new CodexLogUsageCollector(logService, settingsService),
             new AntigravityUsageCollector(),
@@ -127,7 +138,124 @@ public sealed class UsageAggregatorService
 
     private IEnumerable<IUsageCollector> GetEnabledCollectors(AppSettings settings)
     {
-        return _collectors.Where(collector => settings.IsProviderEnabled(collector.ProviderName));
+        return ResolveCollectors(settings)
+            .Where(collector => settings.IsProviderEnabled(GetBaseProviderName(collector)));
+    }
+
+    private static string GetBaseProviderName(IUsageCollector collector)
+    {
+        return collector is AccountScopedUsageCollector accountCollector
+            ? accountCollector.BaseProviderName
+            : collector.ProviderName;
+    }
+
+    // Expands the default Anthropic collector into one collector per configured account.
+    // Injected collector lists (tests, diagnostics fakes) bypass account resolution entirely.
+    private IEnumerable<IUsageCollector> ResolveCollectors(AppSettings settings)
+    {
+        foreach (var collector in _collectors)
+        {
+            if (_defaultAnthropicCollector is not null && ReferenceEquals(collector, _defaultAnthropicCollector))
+            {
+                foreach (var accountCollector in ResolveAnthropicAccountCollectors(settings))
+                {
+                    yield return accountCollector;
+                }
+            }
+            else
+            {
+                yield return collector;
+            }
+        }
+    }
+
+    private IEnumerable<IUsageCollector> ResolveAnthropicAccountCollectors(AppSettings settings)
+    {
+        var accounts = settings.GetAccounts(KnownProviders.Anthropic);
+        PruneRemovedAccountCollectors(accounts);
+
+        var defaultAccountUuid = accounts.FirstOrDefault(account => account.IsDefault)?.AccountUuid ?? string.Empty;
+
+        // When a managed account is the one currently logged into ~/.claude, the default
+        // collector represents THAT account: it carries the managed account's key (so its
+        // card keeps the account's name) and the managed dir's own collector is skipped
+        // (its card would just duplicate the slot with staler tokens).
+        var activeManagedAccount = string.IsNullOrWhiteSpace(defaultAccountUuid)
+            ? null
+            : accounts.FirstOrDefault(account => !account.IsDefault &&
+                string.Equals(account.AccountUuid, defaultAccountUuid, StringComparison.OrdinalIgnoreCase));
+
+        foreach (var account in accounts)
+        {
+            if (account.IsDefault)
+            {
+                var effectiveAccount = activeManagedAccount ?? account;
+                if (!effectiveAccount.Enabled)
+                {
+                    continue;
+                }
+
+                // The wrapper is stateless, so the inner collector's backoff state is shared.
+                yield return string.Equals(effectiveAccount.DisplayKey, KnownProviders.Anthropic, StringComparison.OrdinalIgnoreCase)
+                    ? _defaultAnthropicCollector!
+                    : new AccountScopedUsageCollector(_defaultAnthropicCollector!, effectiveAccount.DisplayKey, KnownProviders.Anthropic);
+            }
+            else if (account.Enabled &&
+                !ReferenceEquals(account, activeManagedAccount) &&
+                !string.IsNullOrWhiteSpace(account.ConfigDir))
+            {
+                yield return GetOrCreateAccountCollector(account);
+            }
+        }
+    }
+
+    private IUsageCollector GetOrCreateAccountCollector(ProviderAccount account)
+    {
+        // Cache per account id: rebuilding collectors every refresh would silently drop
+        // their per-instance OAuth/CLI backoff state.
+        var fingerprint = $"{account.ConfigDir}|{account.DisplayKey}";
+
+        lock (_accountCollectorLock)
+        {
+            if (_anthropicAccountCollectors.TryGetValue(account.Id, out var entry) &&
+                string.Equals(entry.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                return entry.Collector;
+            }
+
+            var collector = new AccountScopedUsageCollector(
+                new ClaudeStatusFileUsageCollector(
+                    claudeConfigDirectory: account.ConfigDir,
+                    allowCliRefresh: false,
+                    tokenRefresher: new AnthropicOAuthTokenRefresher(logService: _logService)),
+                account.DisplayKey,
+                KnownProviders.Anthropic);
+            _anthropicAccountCollectors[account.Id] = new AccountCollectorEntry(fingerprint, collector);
+            return collector;
+        }
+    }
+
+    private void PruneRemovedAccountCollectors(IReadOnlyList<ProviderAccount> accounts)
+    {
+        lock (_accountCollectorLock)
+        {
+            if (_anthropicAccountCollectors.Count == 0)
+            {
+                return;
+            }
+
+            var accountIds = accounts
+                .Select(account => account.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var accountId in _anthropicAccountCollectors.Keys.ToList())
+            {
+                if (!accountIds.Contains(accountId))
+                {
+                    _anthropicAccountCollectors.Remove(accountId);
+                }
+            }
+        }
     }
 
     private void RemoveDisabledFailureStates(IReadOnlyCollection<IUsageCollector> enabledCollectors)
@@ -239,4 +367,6 @@ public sealed class UsageAggregatorService
     }
 
     private sealed record CollectorFailureState(int FailureCount, DateTimeOffset NextRetryAt, DateTimeOffset LastAttemptAt);
+
+    private sealed record AccountCollectorEntry(string Fingerprint, IUsageCollector Collector);
 }

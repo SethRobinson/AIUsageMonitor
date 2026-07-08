@@ -19,6 +19,8 @@ public sealed class AppSettings
 
     public Dictionary<string, bool> EnabledProviders { get; set; } = CreateDefaultEnabledProviders();
 
+    public List<ProviderAccount> ProviderAccounts { get; set; } = [];
+
     public string CursorUsageMode { get; set; } = string.Empty;
 
     public string CursorApiKey { get; set; } = string.Empty;
@@ -56,6 +58,7 @@ public sealed class AppSettings
             UpdateIntervalMinutes = UpdateIntervalMinutes,
             UiScalePercent = UiScalePercent,
             EnabledProviders = NormalizeEnabledProviders(EnabledProviders),
+            ProviderAccounts = NormalizeProviderAccounts(ProviderAccounts, clone: true),
             CursorUsageMode = CursorUsageMode,
             CursorApiKey = CursorApiKey,
             CursorIncludedBudgetDollars = CursorIncludedBudgetDollars,
@@ -79,6 +82,15 @@ public sealed class AppSettings
         return !EnabledProviders.TryGetValue(providerName, out var isEnabled) || isEnabled;
     }
 
+    public IReadOnlyList<ProviderAccount> GetAccounts(string providerName)
+    {
+        return ProviderAccounts
+            .Where(account => string.Equals(account.ProviderName, providerName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(account => account.IsDefault)
+            .ThenBy(account => account.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     public void SetProviderEnabled(string providerName, bool isEnabled)
     {
         EnabledProviders[providerName] = isEnabled;
@@ -94,6 +106,7 @@ public sealed class AppSettings
         UiScalePercent = NormalizeUiScalePercent(UiScalePercent);
 
         EnabledProviders = NormalizeEnabledProviders(EnabledProviders);
+        ProviderAccounts = NormalizeProviderAccounts(ProviderAccounts, clone: false);
         CursorUsageMode = NormalizeCursorUsageMode();
 
         CursorApiKey = CursorApiKey.Trim();
@@ -158,6 +171,69 @@ public sealed class AppSettings
             StringComparer.OrdinalIgnoreCase);
         providers[KnownProviders.AnthropicApiCredits] = false;
         return providers;
+    }
+
+    private static List<ProviderAccount> NormalizeProviderAccounts(List<ProviderAccount>? accounts, bool clone)
+    {
+        var normalizedAccounts = new List<ProviderAccount>();
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenDisplayKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var providersWithDefault = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var account in accounts ?? [])
+        {
+            if (account is null ||
+                string.IsNullOrWhiteSpace(account.Id) ||
+                string.IsNullOrWhiteSpace(account.ProviderName) ||
+                !seenIds.Add(account.Id.Trim()))
+            {
+                continue;
+            }
+
+            var normalizedAccount = clone ? account.Clone() : account;
+            normalizedAccount.Id = normalizedAccount.Id.Trim();
+            normalizedAccount.ProviderName = normalizedAccount.ProviderName.Trim();
+            normalizedAccount.Label = normalizedAccount.Label.Trim();
+            normalizedAccount.ConfigDir = normalizedAccount.ConfigDir.Trim();
+            normalizedAccount.Email = normalizedAccount.Email.Trim();
+            normalizedAccount.AccountUuid = normalizedAccount.AccountUuid.Trim();
+
+            // Only one default account per provider; a default account never has a config dir.
+            if (normalizedAccount.IsDefault)
+            {
+                if (providersWithDefault.Add(normalizedAccount.ProviderName))
+                {
+                    normalizedAccount.ConfigDir = string.Empty;
+                }
+                else
+                {
+                    normalizedAccount.IsDefault = false;
+                }
+            }
+
+            // Keep DisplayKeys unique or two accounts' cards would clobber each other.
+            if (!seenDisplayKeys.Add(normalizedAccount.DisplayKey))
+            {
+                var suffix = 2;
+                var baseLabel = string.IsNullOrWhiteSpace(normalizedAccount.Label)
+                    ? normalizedAccount.Id
+                    : normalizedAccount.Label;
+                while (!seenDisplayKeys.Add(normalizedAccount.DisplayKey))
+                {
+                    normalizedAccount.Label = $"{baseLabel} {suffix}";
+                    suffix++;
+                }
+            }
+
+            normalizedAccounts.Add(normalizedAccount);
+        }
+
+        if (!providersWithDefault.Contains(KnownProviders.Anthropic))
+        {
+            normalizedAccounts.Insert(0, ProviderAccount.CreateDefaultAnthropic());
+        }
+
+        return normalizedAccounts;
     }
 
     private static Dictionary<string, bool> NormalizeEnabledProviders(Dictionary<string, bool>? enabledProviders)

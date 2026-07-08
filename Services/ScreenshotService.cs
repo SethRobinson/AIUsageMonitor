@@ -119,6 +119,97 @@ internal static class ScreenshotService
         }
     }
 
+    public static void SaveAccountsScreenshot(string outputPath, double? requestedWidth = null, double? requestedHeight = null)
+    {
+        var fullPath = Path.GetFullPath(outputPath);
+        var outputDirectory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            Directory.CreateDirectory(outputDirectory);
+        }
+
+        // Render from FAKE demo accounts in a temp settings dir, never the user's real
+        // settings, ~/.claude, or the network.
+        var tempDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Screenshot", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        var settingsService = new AppSettingsService(tempDirectory);
+        var settings = new AppSettings();
+        settings.ProviderAccounts.Add(new ProviderAccount
+        {
+            Id = ProviderAccount.DefaultAnthropicAccountId,
+            ProviderName = KnownProviders.Anthropic,
+            Label = ProviderAccount.DefaultAccountLabel,
+            IsDefault = true,
+            AccountUuid = "demo-uuid-work",
+            Email = "work@example.com"
+        });
+        settings.ProviderAccounts.Add(new ProviderAccount
+        {
+            Id = "anthropic-work-demo",
+            ProviderName = KnownProviders.Anthropic,
+            Label = "Work",
+            ConfigDir = @"C:\demo\accounts\anthropic\work",
+            AccountUuid = "demo-uuid-work",
+            Email = "work@example.com"
+        });
+        settings.ProviderAccounts.Add(new ProviderAccount
+        {
+            Id = "anthropic-personal-demo",
+            ProviderName = KnownProviders.Anthropic,
+            Label = "Personal",
+            ConfigDir = @"C:\demo\accounts\anthropic\personal",
+            AccountUuid = "demo-uuid-personal",
+            Email = "personal@example.com"
+        });
+        settingsService.Save(settings);
+
+        var window = new AnthropicAccountsWindow(settingsService, new AppLogService(tempDirectory), screenshotMode: true)
+        {
+            Left = 0,
+            Top = 0,
+            ShowInTaskbar = false,
+            Topmost = false,
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Width = requestedWidth is > 0 ? requestedWidth.Value : 560
+        };
+
+        if (requestedHeight is > 0)
+        {
+            window.Height = requestedHeight.Value;
+        }
+        else
+        {
+            window.SizeToContent = SizeToContent.Height;
+        }
+
+        try
+        {
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+
+            var width = Math.Max(1, (int)Math.Ceiling(window.ActualWidth));
+            var height = Math.Max(1, (int)Math.Ceiling(window.ActualHeight));
+            var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(window);
+
+            SaveBitmap(bitmap, fullPath, outputDirectory);
+        }
+        finally
+        {
+            window.Close();
+            try
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
     private static void SaveBitmap(BitmapSource bitmap, string fullPath, string? outputDirectory)
     {
         var encoder = new PngBitmapEncoder();

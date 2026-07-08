@@ -32,6 +32,7 @@ public partial class SettingsWindow : Window
         CursorProviderEnabledCheckBox.IsChecked = Settings.IsProviderEnabled(KnownProviders.Cursor);
         UpdateAnthropicApiCreditsSummary();
         UpdateCursorModeSummary();
+        UpdateAnthropicAccountsSummary();
         ClaudeStatusExporterCheckBox.IsChecked = Settings.ClaudeStatusExporterEnabled;
         AutoRunAtLoginCheckBox.IsChecked = Settings.AutoRunAtLoginEnabled || Services.AutoRunService.IsEnabled();
         DiagnosticLoggingCheckBox.IsChecked = Settings.DiagnosticLoggingEnabled;
@@ -41,6 +42,10 @@ public partial class SettingsWindow : Window
     }
 
     public AppSettings Settings { get; private set; }
+
+    // Set when the Claude accounts dialog changed accounts or switched the CLI account;
+    // the tray service refreshes on this even if the Settings dialog itself is cancelled.
+    public bool AccountsRefreshRequested { get; private set; }
 
     public event EventHandler<UiScalePreviewChangedEventArgs>? UiScalePreviewChanged;
 
@@ -101,6 +106,25 @@ public partial class SettingsWindow : Window
 
         MergeSavedAnthropicApiCreditsLogin();
         UpdateAnthropicApiCreditsSummary();
+    }
+
+    private void AnthropicAccountsButtonOnClick(object sender, RoutedEventArgs e)
+    {
+        ApplySettingsFromControls();
+
+        var accountsWindow = new AnthropicAccountsWindow(_settingsService, _logService)
+        {
+            Owner = this
+        };
+        accountsWindow.ShowDialog();
+
+        if (accountsWindow.RefreshRequested)
+        {
+            AccountsRefreshRequested = true;
+        }
+
+        MergeSavedProviderAccounts();
+        UpdateAnthropicAccountsSummary();
     }
 
     private void ProviderSetupButtonOnClick(object sender, RoutedEventArgs e)
@@ -235,6 +259,7 @@ public partial class SettingsWindow : Window
         Settings.AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true;
         MergeSavedAnthropicApiCreditsLogin();
         MergeSavedCursorDashboardLogin();
+        MergeSavedProviderAccounts();
         Settings.Normalize();
     }
 
@@ -319,6 +344,22 @@ public partial class SettingsWindow : Window
         var savedSettings = _settingsService.Load();
         Settings.CursorDashboardCookieHeaderProtected = savedSettings.CursorDashboardCookieHeaderProtected;
         Settings.CursorDashboardCookiesCapturedAt = savedSettings.CursorDashboardCookiesCapturedAt;
+    }
+
+    // The accounts dialog saves directly to disk, so pull its result back into this dialog's
+    // working copy or the final Save would clobber account changes.
+    private void MergeSavedProviderAccounts()
+    {
+        var savedSettings = _settingsService.Load();
+        Settings.ProviderAccounts = savedSettings.ProviderAccounts.Select(account => account.Clone()).ToList();
+    }
+
+    private void UpdateAnthropicAccountsSummary()
+    {
+        var accounts = Settings.GetAccounts(KnownProviders.Anthropic);
+        AnthropicAccountsSummaryTextBlock.Text = accounts.Count <= 1
+            ? "One account (your normal ~/.claude login). Use Accounts to monitor more."
+            : $"{accounts.Count} accounts: {string.Join(", ", accounts.Select(account => account.Label))}.";
     }
 
     protected override void OnSourceInitialized(EventArgs e)

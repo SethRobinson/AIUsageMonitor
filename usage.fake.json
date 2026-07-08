@@ -41,6 +41,27 @@
       ]
     },
     {
+      "name": "Anthropic - Work",
+      "planName": "Max 5x",
+      "source": "Fake data",
+      "windows": [
+      {
+        "title": "5h",
+        "limit": 100,
+        "used": 43,
+        "remaining": 57,
+        "resetAt": "2026-05-23T04:00:00+09:00"
+      },
+      {
+        "title": "7d",
+        "limit": 100,
+        "used": 68,
+        "remaining": 32,
+        "resetAt": "2026-05-25T01:30:00+09:00"
+      }
+      ]
+    },
+    {
       "name": "Anthropic API Credits",
       "source": "Fake data",
       "statusMessage": "Anthropic Console prepaid API credit balance.",

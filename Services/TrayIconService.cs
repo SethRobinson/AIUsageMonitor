@@ -348,6 +348,14 @@ public sealed class TrayIconService : IDisposable
 
         if (!saved)
         {
+            if (settingsWindow.AccountsRefreshRequested)
+            {
+                // Account changes and CLI switches are saved directly by the accounts
+                // dialog, so honor them even when the Settings dialog is cancelled.
+                _settings = _settingsService.Load();
+                _ = ManualRefreshAsync();
+            }
+
             return;
         }
 
@@ -359,7 +367,8 @@ public sealed class TrayIconService : IDisposable
             _settings.OverlayWindowPlacement = _overlayWindow.GetCurrentPlacement();
         }
 
-        var nonScaleSettingsChanged = HasNonScaleSettingsChanged(previousSettings, _settings);
+        var nonScaleSettingsChanged = HasNonScaleSettingsChanged(previousSettings, _settings) ||
+            settingsWindow.AccountsRefreshRequested;
         EndOverlayScalePreview();
         _settingsService.Save(_settings);
 
@@ -408,6 +417,7 @@ public sealed class TrayIconService : IDisposable
                previousSettings.ClaudeStatusExporterEnabled != nextSettings.ClaudeStatusExporterEnabled ||
                previousSettings.AutoRunAtLoginEnabled != nextSettings.AutoRunAtLoginEnabled ||
                !EnabledProvidersEqual(previousSettings.EnabledProviders, nextSettings.EnabledProviders) ||
+               !ProviderAccountsEqual(previousSettings.ProviderAccounts, nextSettings.ProviderAccounts) ||
                !string.Equals(previousSettings.CursorUsageMode, nextSettings.CursorUsageMode, StringComparison.Ordinal) ||
                !string.Equals(previousSettings.CursorApiKey, nextSettings.CursorApiKey, StringComparison.Ordinal) ||
                Math.Abs(previousSettings.CursorIncludedBudgetDollars - nextSettings.CursorIncludedBudgetDollars) > 0.001 ||
@@ -416,6 +426,23 @@ public sealed class TrayIconService : IDisposable
                    nextSettings.CursorDashboardCookieHeaderProtected,
                    StringComparison.Ordinal) ||
                previousSettings.CursorDashboardCookiesCapturedAt != nextSettings.CursorDashboardCookiesCapturedAt;
+    }
+
+    private static bool ProviderAccountsEqual(
+        IReadOnlyList<ProviderAccount> previousAccounts,
+        IReadOnlyList<ProviderAccount> nextAccounts)
+    {
+        if (previousAccounts.Count != nextAccounts.Count)
+        {
+            return false;
+        }
+
+        static string Describe(ProviderAccount account) =>
+            $"{account.Id}|{account.ProviderName}|{account.Label}|{account.Enabled}|{account.IsDefault}|{account.ConfigDir}|{account.AccountUuid}";
+
+        var previousKeys = previousAccounts.Select(Describe).OrderBy(key => key, StringComparer.OrdinalIgnoreCase);
+        var nextKeys = nextAccounts.Select(Describe).OrderBy(key => key, StringComparer.OrdinalIgnoreCase);
+        return previousKeys.SequenceEqual(nextKeys, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool EnabledProvidersEqual(

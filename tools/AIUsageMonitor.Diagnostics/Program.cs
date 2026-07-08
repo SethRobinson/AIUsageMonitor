@@ -99,7 +99,7 @@ internal static class DiagnosticsProgram
     private static AppSettingsService CreateLiveSettingsService(RefreshOptions options)
     {
         var settingsService = new AppSettingsService();
-        if (string.IsNullOrWhiteSpace(options.Provider))
+        if (string.IsNullOrWhiteSpace(options.Provider) && string.IsNullOrWhiteSpace(options.Account))
         {
             return settingsService;
         }
@@ -108,11 +108,27 @@ internal static class DiagnosticsProgram
         Directory.CreateDirectory(tempDirectory);
         var filteredSettingsService = new AppSettingsService(tempDirectory);
         var settings = settingsService.Load();
-        foreach (var providerName in KnownProviders.All)
+
+        if (!string.IsNullOrWhiteSpace(options.Provider))
         {
-            settings.SetProviderEnabled(
-                providerName,
-                string.Equals(providerName, options.Provider, StringComparison.OrdinalIgnoreCase));
+            // --provider matches the base provider, so all of its enabled accounts run.
+            foreach (var providerName in KnownProviders.All)
+            {
+                settings.SetProviderEnabled(
+                    providerName,
+                    string.Equals(providerName, options.Provider, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Account))
+        {
+            // --account narrows to one account by id or label.
+            foreach (var account in settings.ProviderAccounts)
+            {
+                account.Enabled =
+                    string.Equals(account.Id, options.Account, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(account.Label, options.Account, StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         filteredSettingsService.Save(settings);
@@ -272,6 +288,7 @@ internal static class DiagnosticsProgram
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --fake --scenario cancel --cancel-after-ms 500");
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --timeout-seconds 120");
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --provider Anthropic --force-refresh --timeout-seconds 120");
+        Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --provider Anthropic --account Work --timeout-seconds 120");
     }
 }
 
@@ -280,6 +297,7 @@ internal sealed record RefreshOptions(
     bool Live,
     string Scenario,
     string Provider,
+    string Account,
     bool ForceRefresh,
     bool AssertIndependent,
     int CancelAfterMilliseconds,
@@ -291,6 +309,7 @@ internal sealed record RefreshOptions(
         var live = false;
         var scenario = "staggered";
         var provider = string.Empty;
+        var account = string.Empty;
         var forceRefresh = false;
         var assertIndependent = false;
         var cancelAfterMilliseconds = 500;
@@ -311,6 +330,9 @@ internal sealed record RefreshOptions(
                     break;
                 case "--provider" when index + 1 < args.Length:
                     provider = args[++index];
+                    break;
+                case "--account" when index + 1 < args.Length:
+                    account = args[++index];
                     break;
                 case "--force-refresh":
                     forceRefresh = true;
@@ -334,7 +356,7 @@ internal sealed record RefreshOptions(
             fake = true;
         }
 
-        return new RefreshOptions(fake, live, scenario, provider, forceRefresh, assertIndependent, cancelAfterMilliseconds, timeoutSeconds);
+        return new RefreshOptions(fake, live, scenario, provider, account, forceRefresh, assertIndependent, cancelAfterMilliseconds, timeoutSeconds);
     }
 }
 

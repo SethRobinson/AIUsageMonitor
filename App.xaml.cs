@@ -18,6 +18,22 @@ public partial class App : System.Windows.Application
         _logService = new AppLogService();
         RegisterGlobalExceptionHandlers();
 
+        if (TryGetNamedScreenshotOptions(e.Args, "--screenshot-accounts", out var accountsScreenshotPath, out var accountsScreenshotWidth, out var accountsScreenshotHeight))
+        {
+            try
+            {
+                ScreenshotService.SaveAccountsScreenshot(accountsScreenshotPath, accountsScreenshotWidth, accountsScreenshotHeight);
+                Shutdown();
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Could not save accounts screenshot: {exception.Message}");
+                Shutdown(1);
+            }
+
+            return;
+        }
+
         if (TryGetSettingsScreenshotOptions(e.Args, out var settingsScreenshotPath, out var settingsScreenshotWidth, out var settingsScreenshotHeight))
         {
             try
@@ -163,13 +179,18 @@ public partial class App : System.Windows.Application
 
     private static bool TryGetSettingsScreenshotOptions(string[] args, out string path, out double? width, out double? height)
     {
+        return TryGetNamedScreenshotOptions(args, "--screenshot-settings", out path, out width, out height);
+    }
+
+    private static bool TryGetNamedScreenshotOptions(string[] args, string optionName, out string path, out double? width, out double? height)
+    {
         path = string.Empty;
         width = null;
         height = null;
 
         for (var index = 0; index < args.Length - 1; index++)
         {
-            if (string.Equals(args[index], "--screenshot-settings", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(args[index], optionName, StringComparison.OrdinalIgnoreCase))
             {
                 path = args[index + 1];
                 index++;

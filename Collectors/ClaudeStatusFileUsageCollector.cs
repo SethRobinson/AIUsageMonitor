@@ -41,11 +41,48 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     };
     private readonly string? _homeDirectory;
     private readonly HttpClient _httpClient;
+    private readonly string? _claudeConfigDirectory;
+    private readonly bool _allowCliRefresh;
+    private readonly Services.AnthropicOAuthTokenRefresher? _tokenRefresher;
 
-    public ClaudeStatusFileUsageCollector(string? homeDirectory = null, HttpClient? httpClient = null)
+    public ClaudeStatusFileUsageCollector(
+        string? homeDirectory = null,
+        HttpClient? httpClient = null,
+        string? claudeConfigDirectory = null,
+        bool allowCliRefresh = true,
+        Services.AnthropicOAuthTokenRefresher? tokenRefresher = null)
     {
         _homeDirectory = homeDirectory;
         _httpClient = httpClient ?? SharedHttpClient;
+        _claudeConfigDirectory = claudeConfigDirectory;
+        _allowCliRefresh = allowCliRefresh;
+        _tokenRefresher = tokenRefresher;
+    }
+
+    // Managed accounts have no CLI keeping their tokens alive, so resolve the access token
+    // through the refresher when one is configured. Returns null when the account's refresh
+    // token was rejected (login expired).
+    private async Task<ClaudeAccount?> ResolveAccountAsync(
+        string credentialsPath,
+        ClaudeAccount? account,
+        bool forceRefresh,
+        CancellationToken cancellationToken)
+    {
+        account ??= TryReadClaudeAccount(credentialsPath);
+        if (_tokenRefresher is null)
+        {
+            return account;
+        }
+
+        var accessToken = await _tokenRefresher
+            .GetFreshAccessTokenAsync(credentialsPath, forceRefresh, cancellationToken)
+            .ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return null;
+        }
+
+        return new ClaudeAccount(accessToken, account?.PlanName ?? string.Empty);
     }
 
     public string ProviderName => KnownProviders.Anthropic;
@@ -58,7 +95,11 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     public async Task<ProviderUsage> CollectAsync(bool forceRefresh, CancellationToken cancellationToken)
     {
         var home = _homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var claudeDirectory = Path.Combine(home, ".claude");
+        // A managed account dir is used as-is (CLAUDE_CONFIG_DIR semantics: the dir IS the
+        // config dir, no ".claude" suffix), so per-account caches land in that dir too.
+        var claudeDirectory = !string.IsNullOrWhiteSpace(_claudeConfigDirectory)
+            ? _claudeConfigDirectory
+            : Path.Combine(home, ".claude");
         var credentialsPath = Path.Combine(claudeDirectory, ".credentials.json");
         var profileCachePath = Path.Combine(claudeDirectory, ProfileCacheName);
         var oauthUsageCachePath = Path.Combine(claudeDirectory, OAuthUsageCacheName);
@@ -155,7 +196,8 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             return CreateCachedOAuthFallback(cachedOAuthUsage, string.Join(" ", statusNotes));
         }
 
-        if (localUsage.FreshUsage is null &&
+        if (_allowCliRefresh &&
+            localUsage.FreshUsage is null &&
             (forceRefresh || _nextCommandRefreshAt <= now) &&
             (!oauthPaused || forceRefresh) &&
             (!oauthUsage.IsRateLimited || forceRefresh))
@@ -703,7 +745,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             return string.Empty;
         }
 
-        account ??= TryReadClaudeAccount(credentialsPath);
+        account = await ResolveAccountAsync(credentialsPath, account, forceRefresh: false, cancellationToken);
         var accessToken = account?.AccessToken;
         if (string.IsNullOrWhiteSpace(accessToken))
         {
@@ -756,37 +798,75 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             return OAuthUsageReadResult.None;
         }
 
-        account ??= TryReadClaudeAccount(credentialsPath);
+        account = await ResolveAccountAsync(credentialsPath, account, forceRefresh: false, cancellationToken);
         var accessToken = account?.AccessToken;
         if (string.IsNullOrWhiteSpace(accessToken))
         {
-            return OAuthUsageReadResult.None;
+            return _tokenRefresher is null
+                ? OAuthUsageReadResult.None
+                : OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
+                    "Anthropic",
+                    "Claude account login expired. Log this account in again from Settings.",
+                    credentialsPath,
+                    fallbackPlanName));
         }
-
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com/api/oauth/usage");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
 
         HttpResponseMessage response;
-        try
+        var attempt = 1;
+        while (true)
         {
-            response = await _httpClient.SendAsync(request, cancellationToken);
-        }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com/api/oauth/usage");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
+
+            try
+            {
+                response = await _httpClient.SendAsync(request, cancellationToken);
+            }
+            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
                 return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
                     "Anthropic",
                     "Claude OAuth usage endpoint timed out. Local status-line export will be used if it is fresh.",
                     credentialsPath,
                     fallbackPlanName));
-        }
-        catch (HttpRequestException ex)
-        {
+            }
+            catch (HttpRequestException ex)
+            {
                 return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
                     "Anthropic",
                     $"Claude OAuth usage endpoint failed: {ex.Message}",
                     credentialsPath,
                     fallbackPlanName));
+            }
+
+            // A 401 right after a token read usually means the stored token went stale
+            // between refreshes; force one refresh and retry once.
+            if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden &&
+                attempt == 1 &&
+                _tokenRefresher is not null)
+            {
+                response.Dispose();
+                attempt++;
+
+                var refreshedToken = await _tokenRefresher
+                    .GetFreshAccessTokenAsync(credentialsPath, forceRefresh: true, cancellationToken)
+                    .ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(refreshedToken) ||
+                    string.Equals(refreshedToken, accessToken, StringComparison.Ordinal))
+                {
+                    return OAuthUsageReadResult.Unavailable(ProviderUsageFactory.Unavailable(
+                        "Anthropic",
+                        "Claude account login expired or was revoked. Log this account in again from Settings.",
+                        credentialsPath,
+                        fallbackPlanName));
+                }
+
+                accessToken = refreshedToken;
+                continue;
+            }
+
+            break;
         }
 
         using (response)

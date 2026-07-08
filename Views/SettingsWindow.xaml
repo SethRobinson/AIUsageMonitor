@@ -132,15 +132,26 @@
                                                           Content="Install Claude Code status exporter automatically"
                                                           Foreground="#D6DAE1"
                                                           FontSize="12" />
+                                                <TextBlock x:Name="AnthropicAccountsSummaryTextBlock"
+                                                           Margin="24,8,0,0"
+                                                           Foreground="#A8AFBA"
+                                                           FontSize="12"
+                                                           TextWrapping="Wrap" />
                                             </StackPanel>
-                                            <Button Grid.Column="1"
-                                                    Width="82"
-                                                    Height="30"
-                                                    Margin="12,0,0,0"
-                                                    VerticalAlignment="Top"
-                                                    Content="Setup"
-                                                    Tag="Anthropic"
-                                                    Click="ProviderSetupButtonOnClick" />
+                                            <StackPanel Grid.Column="1"
+                                                        Margin="12,0,0,0"
+                                                        VerticalAlignment="Top">
+                                                <Button Width="82"
+                                                        Height="30"
+                                                        Content="Setup"
+                                                        Tag="Anthropic"
+                                                        Click="ProviderSetupButtonOnClick" />
+                                                <Button Width="82"
+                                                        Height="30"
+                                                        Margin="0,6,0,0"
+                                                        Content="Accounts"
+                                                        Click="AnthropicAccountsButtonOnClick" />
+                                            </StackPanel>
                                         </Grid>
                                     </Border>
 
