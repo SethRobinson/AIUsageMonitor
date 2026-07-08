@@ -115,6 +115,9 @@
                 <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
                     <Setter Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="MiniTall">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 
@@ -131,6 +134,15 @@
             <Setter Property="Visibility" Value="Collapsed" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CardMiniTallOnlyElementStyle" TargetType="{x:Type FrameworkElement}">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="MiniTall">
                     <Setter Property="Visibility" Value="Visible" />
                 </DataTrigger>
             </Style.Triggers>
@@ -176,6 +188,11 @@
                 <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="Mini">
                     <Setter Property="Margin" Value="3,2" />
                     <Setter Property="Padding" Value="6,4" />
+                    <Setter Property="MinHeight" Value="0" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding CardDetailLevel, RelativeSource={RelativeSource AncestorType=Window}}" Value="MiniTall">
+                    <Setter Property="Margin" Value="3,2" />
+                    <Setter Property="Padding" Value="8,6" />
                     <Setter Property="MinHeight" Value="0" />
                 </DataTrigger>
             </Style.Triggers>
@@ -627,6 +644,7 @@
                                                         <Binding Path="Windows.Count" />
                                                         <Binding Path="IsUnavailable" />
                                                         <Binding Path="StatusMessage" />
+                                                        <Binding Path="CardSlotWidth" RelativeSource="{RelativeSource AncestorType=Window}" />
                                                     </MultiBinding>
                                                 </ScaleTransform.ScaleX>
                                                 <ScaleTransform.ScaleY>
@@ -637,6 +655,7 @@
                                                         <Binding Path="Windows.Count" />
                                                         <Binding Path="IsUnavailable" />
                                                         <Binding Path="StatusMessage" />
+                                                        <Binding Path="CardSlotWidth" RelativeSource="{RelativeSource AncestorType=Window}" />
                                                     </MultiBinding>
                                                 </ScaleTransform.ScaleY>
                                             </ScaleTransform>
@@ -829,6 +848,55 @@
                                                                        FontWeight="SemiBold"
                                                                        VerticalAlignment="Center" />
                                                         </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+
+                                        <StackPanel Style="{StaticResource CardMiniTallOnlyElementStyle}"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding MiniSummaryText}"
+                                                       Foreground="#F3F4F6"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <ItemsControl ItemsSource="{Binding Windows}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,5,0,0">
+                                                            <ProgressBar Height="5"
+                                                                         Value="{Binding RemainingPercent, Mode=OneWay}"
+                                                                         Foreground="{Binding ProgressBrush}">
+                                                                <ProgressBar.Style>
+                                                                    <Style TargetType="{x:Type ProgressBar}"
+                                                                           BasedOn="{StaticResource UsageProgressBarStyle}">
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding ShowsProgress}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </ProgressBar.Style>
+                                                            </ProgressBar>
+                                                            <Grid Margin="0,3,0,0">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding Title}"
+                                                                           Foreground="#A8AFBA"
+                                                                           FontSize="10"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="1"
+                                                                           Margin="8,0,0,0"
+                                                                           Text="{Binding ResetRelativeText}"
+                                                                           Foreground="{Binding ResetRelativeBrush}"
+                                                                           FontSize="10"
+                                                                           FontWeight="SemiBold"
+                                                                           VerticalAlignment="Center" />
+                                                            </Grid>
+                                                        </StackPanel>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>

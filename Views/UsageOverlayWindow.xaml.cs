@@ -16,6 +16,7 @@ public partial class UsageOverlayWindow : Window
     private const string FullDisplayMode = "Full";
     private const string CompactDisplayMode = "Compact";
     private const string MiniDisplayMode = "Mini";
+    private const string MiniTallDisplayMode = "MiniTall";
     private const double CompactWidthBreakpoint = 760;
     private const double MiniWidthBreakpoint = 500;
     private const double MiniHeightBreakpoint = 290;
@@ -27,6 +28,8 @@ public partial class UsageOverlayWindow : Window
     private const double CardFullMinCellHeight = 250;
     private const double CardCompactMinCellWidth = 200;
     private const double CardCompactMinCellHeight = 90;
+    private const double CardMiniTallMinCellWidth = 112;
+    private const double CardMiniTallMinCellHeight = 82;
     private const double MaxCardScale = 1.5;
     private const double CardScaleBaseWidth = 300;
     private const double CardScaleBaseHeight = 250;
@@ -525,6 +528,11 @@ public partial class UsageOverlayWindow : Window
             CardSlotHeight = cellHeight;
         }
 
+        if (Math.Abs(CardSlotWidth - cellWidth) > 0.001)
+        {
+            CardSlotWidth = cellWidth;
+        }
+
         var detailLevel = GetCardDetailLevel(cellWidth, cellHeight);
         if (!string.Equals(CardDetailLevel, detailLevel, StringComparison.Ordinal))
         {
@@ -610,8 +618,11 @@ public partial class UsageOverlayWindow : Window
         return FullDisplayMode;
     }
 
-    // Pick the column count whose resulting cells sit closest to a comfortable card aspect ratio,
-    // so a wide window spreads cards across columns and a tall / narrow window stacks them into rows.
+    // Pick the column count whose cells show the most information: prefer the layout that unlocks
+    // the richest card detail level, and only then fall back to the comfortable-aspect score. This
+    // keeps a wide window spreading cards across columns and a tall / narrow window stacking rows,
+    // but never picks a pretty-shaped grid whose cells can only fit a one-line Mini card when a
+    // different column count would fit Full / Compact / stacked cards.
     private static int ChooseCardColumns(double availableWidth, double availableHeight, int providerCount)
     {
         if (providerCount <= 1)
@@ -620,6 +631,7 @@ public partial class UsageOverlayWindow : Window
         }
 
         var bestColumns = 1;
+        var bestRank = -1;
         var bestScore = double.MaxValue;
         for (var columns = 1; columns <= providerCount; columns++)
         {
@@ -631,16 +643,29 @@ public partial class UsageOverlayWindow : Window
                 continue;
             }
 
+            var rank = GetCardDetailRank(GetCardDetailLevel(cellWidth, cellHeight));
             var aspect = cellWidth / cellHeight;
             var score = Math.Abs(Math.Log(aspect) - Math.Log(CardAreaTargetAspect)) + 0.08 * (columns * rows - providerCount);
-            if (score < bestScore)
+            if (rank > bestRank || (rank == bestRank && score < bestScore))
             {
+                bestRank = rank;
                 bestScore = score;
                 bestColumns = columns;
             }
         }
 
         return bestColumns;
+    }
+
+    private static int GetCardDetailRank(string detailLevel)
+    {
+        return detailLevel switch
+        {
+            FullDisplayMode => 3,
+            CompactDisplayMode => 2,
+            MiniTallDisplayMode => 1,
+            _ => 0
+        };
     }
 
     private static string GetCardDetailLevel(double cellWidth, double cellHeight)
@@ -653,6 +678,13 @@ public partial class UsageOverlayWindow : Window
         if (cellWidth >= CardCompactMinCellWidth && cellHeight >= CardCompactMinCellHeight)
         {
             return CompactDisplayMode;
+        }
+
+        // Narrow-but-tall cells can't fit Compact's side-by-side window rows, but they have
+        // vertical room for a stacked variant with per-window bars and reset times.
+        if (cellWidth >= CardMiniTallMinCellWidth && cellHeight >= CardMiniTallMinCellHeight)
+        {
+            return MiniTallDisplayMode;
         }
 
         return MiniDisplayMode;
