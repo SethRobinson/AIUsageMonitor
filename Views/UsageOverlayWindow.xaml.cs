@@ -113,9 +113,12 @@ public partial class UsageOverlayWindow : Window
         new PropertyMetadata(1d));
 
     private double _resizeStartHeight;
+    private double _resizeStartLeft;
+    private double _resizeStartTop;
     private double _resizeStartWidth;
     private System.Windows.Point _resizeStartScreenPoint;
     private Thumb? _activeResizeThumb;
+    private ResizeDirection _activeResizeDirection;
     private INotifyCollectionChanged? _providersCollection;
     private bool _responsiveLayoutQueued;
 
@@ -373,22 +376,60 @@ public partial class UsageOverlayWindow : Window
 
     private void ResizeThumbOnDragStarted(object sender, DragStartedEventArgs e)
     {
-        if (sender is Thumb thumb)
+        if (sender is not Thumb thumb ||
+            !Enum.TryParse(thumb.Tag as string, out ResizeDirection direction) ||
+            direction == ResizeDirection.None)
         {
-            _activeResizeThumb = thumb;
-            _activeResizeThumb.Visibility = Visibility.Visible;
+            return;
         }
 
+        _activeResizeThumb = thumb;
+        _activeResizeThumb.Visibility = Visibility.Visible;
+        _activeResizeDirection = direction;
         _resizeStartWidth = ActualWidth;
         _resizeStartHeight = ActualHeight;
+        _resizeStartLeft = Left;
+        _resizeStartTop = Top;
         _resizeStartScreenPoint = GetMouseScreenPosition();
     }
 
     private void ResizeThumbOnDragDelta(object sender, DragDeltaEventArgs e)
     {
+        if (_activeResizeDirection == ResizeDirection.None)
+        {
+            return;
+        }
+
         var delta = ScreenPixelsToDips(GetMouseScreenPosition() - _resizeStartScreenPoint);
-        Width = Math.Max(MinWidth, _resizeStartWidth + delta.X);
-        Height = Math.Max(MinHeight, _resizeStartHeight + delta.Y);
+        var width = _resizeStartWidth;
+        var height = _resizeStartHeight;
+        var left = _resizeStartLeft;
+        var top = _resizeStartTop;
+
+        if (_activeResizeDirection.HasFlag(ResizeDirection.Left))
+        {
+            width = Math.Max(MinWidth, _resizeStartWidth - delta.X);
+            left = _resizeStartLeft + _resizeStartWidth - width;
+        }
+        else if (_activeResizeDirection.HasFlag(ResizeDirection.Right))
+        {
+            width = Math.Max(MinWidth, _resizeStartWidth + delta.X);
+        }
+
+        if (_activeResizeDirection.HasFlag(ResizeDirection.Top))
+        {
+            height = Math.Max(MinHeight, _resizeStartHeight - delta.Y);
+            top = _resizeStartTop + _resizeStartHeight - height;
+        }
+        else if (_activeResizeDirection.HasFlag(ResizeDirection.Bottom))
+        {
+            height = Math.Max(MinHeight, _resizeStartHeight + delta.Y);
+        }
+
+        Left = left;
+        Top = top;
+        Width = width;
+        Height = height;
     }
 
     private void ResizeThumbOnDragCompleted(object sender, DragCompletedEventArgs e)
@@ -400,6 +441,7 @@ public partial class UsageOverlayWindow : Window
 
         _activeResizeThumb.ClearValue(VisibilityProperty);
         _activeResizeThumb = null;
+        _activeResizeDirection = ResizeDirection.None;
     }
 
     private void ProvidersListOnSizeChanged(object sender, SizeChangedEventArgs e)
@@ -933,6 +975,20 @@ public partial class UsageOverlayWindow : Window
         int Rows,
         double CardSlotWidth,
         double ProvidersListWidth);
+
+    [Flags]
+    private enum ResizeDirection
+    {
+        None = 0,
+        Left = 1,
+        Top = 2,
+        Right = 4,
+        Bottom = 8,
+        TopLeft = Top | Left,
+        TopRight = Top | Right,
+        BottomLeft = Bottom | Left,
+        BottomRight = Bottom | Right
+    }
 
     private System.Windows.Point GetMouseScreenPosition()
     {

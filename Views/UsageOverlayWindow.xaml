@@ -331,6 +331,38 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+
+        <ControlTemplate x:Key="InvisibleResizeThumbTemplate" TargetType="{x:Type Thumb}">
+            <Border Background="#01000000" />
+        </ControlTemplate>
+
+        <Style x:Key="WindowEdgeResizeThumbStyle" TargetType="{x:Type Thumb}">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template" Value="{StaticResource InvisibleResizeThumbTemplate}" />
+        </Style>
+
+        <Style x:Key="HorizontalWindowEdgeResizeThumbStyle"
+               TargetType="{x:Type Thumb}"
+               BasedOn="{StaticResource WindowEdgeResizeThumbStyle}">
+            <Setter Property="Height" Value="8" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="SizeNS" />
+        </Style>
+
+        <Style x:Key="VerticalWindowEdgeResizeThumbStyle"
+               TargetType="{x:Type Thumb}"
+               BasedOn="{StaticResource WindowEdgeResizeThumbStyle}">
+            <Setter Property="Width" Value="8" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="SizeWE" />
+        </Style>
+
+        <Style x:Key="WindowCornerResizeThumbStyle"
+               TargetType="{x:Type Thumb}"
+               BasedOn="{StaticResource WindowEdgeResizeThumbStyle}">
+            <Setter Property="Width" Value="14" />
+            <Setter Property="Height" Value="14" />
+        </Style>
     </Window.Resources>
 
     <Grid x:Name="WindowRoot"
@@ -1017,19 +1049,80 @@
 
                 <Thumb HorizontalAlignment="Right"
                        VerticalAlignment="Bottom"
+                       Tag="BottomRight"
                        Style="{StaticResource InlineMiniResizeThumbStyle}"
                        DragStarted="ResizeThumbOnDragStarted"
                        DragDelta="ResizeThumbOnDragDelta"
                        DragCompleted="ResizeThumbOnDragCompleted" />
             </Grid>
             </Border>
-        </Grid>
+            <Grid Margin="{Binding Margin, ElementName=ChromeBorder}">
+                <Thumb Style="{StaticResource WindowResizeThumbStyle}"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Bottom"
+                       Tag="BottomRight"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
 
-        <Thumb Style="{StaticResource WindowResizeThumbStyle}"
-               HorizontalAlignment="Right"
-               VerticalAlignment="Bottom"
-               DragStarted="ResizeThumbOnDragStarted"
-               DragDelta="ResizeThumbOnDragDelta"
-               DragCompleted="ResizeThumbOnDragCompleted" />
+                <Thumb Tag="Top"
+                       Style="{StaticResource HorizontalWindowEdgeResizeThumbStyle}"
+                       VerticalAlignment="Top"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
+                <Thumb Tag="Bottom"
+                       Style="{StaticResource HorizontalWindowEdgeResizeThumbStyle}"
+                       VerticalAlignment="Bottom"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
+                <Thumb Tag="Left"
+                       Style="{StaticResource VerticalWindowEdgeResizeThumbStyle}"
+                       HorizontalAlignment="Left"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
+                <Thumb Tag="Right"
+                       Style="{StaticResource VerticalWindowEdgeResizeThumbStyle}"
+                       HorizontalAlignment="Right"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
+
+                <Thumb Tag="TopLeft"
+                       Style="{StaticResource WindowCornerResizeThumbStyle}"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Top"
+                       Cursor="SizeNWSE"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
+                <Thumb Tag="TopRight"
+                       Style="{StaticResource WindowCornerResizeThumbStyle}"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Top"
+                       Cursor="SizeNESW"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
+                <Thumb Tag="BottomLeft"
+                       Style="{StaticResource WindowCornerResizeThumbStyle}"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Bottom"
+                       Cursor="SizeNESW"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
+                <Thumb Tag="BottomRight"
+                       Style="{StaticResource WindowCornerResizeThumbStyle}"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Bottom"
+                       Cursor="SizeNWSE"
+                       DragStarted="ResizeThumbOnDragStarted"
+                       DragDelta="ResizeThumbOnDragDelta"
+                       DragCompleted="ResizeThumbOnDragCompleted" />
+            </Grid>
+        </Grid>
     </Grid>
 </Window>
