@@ -534,8 +534,8 @@
                         </ItemsControl.Style>
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <UniformGrid IsItemsHost="True"
-                                             Columns="{Binding CardColumns, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                <views:BalancedCardPanel IsItemsHost="True"
+                                                         Columns="{Binding CardColumns, RelativeSource={RelativeSource AncestorType=Window}}" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
@@ -805,9 +805,13 @@
                                             </ItemsControl>
                                         </StackPanel>
 
-                                        <StackPanel Style="{StaticResource CardCompactOnlyElementStyle}"
-                                                    VerticalAlignment="Center">
-                                            <Grid>
+                                        <Grid Style="{StaticResource CardCompactOnlyElementStyle}"
+                                              VerticalAlignment="Stretch">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+                                            <Grid Grid.Row="0">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
@@ -830,11 +834,19 @@
                                                 </Border>
                                             </Grid>
 
-                                            <ItemsControl Margin="0,8,0,0"
+                                            <ItemsControl Grid.Row="1"
+                                                          Margin="0,8,0,0"
                                                           ItemsSource="{Binding Windows}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <UniformGrid IsItemsHost="True"
+                                                                     Columns="1" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Grid Margin="0,5,0,0">
+                                                        <Grid Margin="0,2,0,2"
+                                                              VerticalAlignment="Center">
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="Auto" />
                                                                 <ColumnDefinition Width="*" />
@@ -883,19 +895,32 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
-                                        </StackPanel>
+                                        </Grid>
 
-                                        <StackPanel Style="{StaticResource CardMiniTallOnlyElementStyle}"
-                                                    VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding MiniSummaryText}"
+                                        <Grid Style="{StaticResource CardMiniTallOnlyElementStyle}"
+                                              VerticalAlignment="Stretch">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Grid.Row="0"
+                                                       Text="{Binding MiniSummaryText}"
                                                        Foreground="#F3F4F6"
                                                        FontSize="12"
                                                        FontWeight="SemiBold"
                                                        TextTrimming="CharacterEllipsis" />
-                                            <ItemsControl ItemsSource="{Binding Windows}">
+                                            <ItemsControl Grid.Row="1"
+                                                          ItemsSource="{Binding Windows}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <UniformGrid IsItemsHost="True"
+                                                                     Columns="1" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <StackPanel Margin="0,5,0,0">
+                                                        <StackPanel Margin="0,2,0,2"
+                                                                    VerticalAlignment="Center">
                                                             <ProgressBar Height="5"
                                                                          Value="{Binding RemainingPercent, Mode=OneWay}"
                                                                          Foreground="{Binding ProgressBrush}">
@@ -932,7 +957,7 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
-                                        </StackPanel>
+                                        </Grid>
 
                                         <StackPanel Style="{StaticResource CardMiniOnlyElementStyle}"
                                                     VerticalAlignment="Center">

@@ -32,6 +32,8 @@
   - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot-settings .\docs\screenshot-settings.png` (pass `--screenshot-size WxH` to force an explicit size instead of auto-fit).
 - The Claude Accounts dialog README screenshot renders from FAKE demo accounts (work/personal in a temp settings dir; no real settings, ~/.claude reads, or network). Regenerate it with:
   - `dotnet run --project .\AIUsageMonitor.csproj -- --screenshot-accounts .\docs\screenshot-accounts.png`
+- Responsive overlay layout regressions can be checked with the permanent fake-data sweep. It renders 520 supported size/scale/content combinations without reading settings, credentials, or provider APIs, then writes a JSON report, contact sheets, and worst-case PNGs under the requested output directory. Hard geometry, missing-card-content, or excessive-internal-gap failures return a nonzero exit code:
+  - `dotnet run --project .\AIUsageMonitor.csproj -- --layout-sweep .\artifacts\layout-sweep`
 - When the user says to bump the version, increment it by 0.01, for example `V1.02` becomes `V1.03`. Update both `Services\AppMetadata.cs` and the README download section's current version and latest updated date.
 - `package-release.bat` publishes a self-contained win-x64 single-file build, signs it, verifies the signature, copies `build\SethsAIUsageMonitor.exe`, and creates `artifacts\SethsAIUsageMonitor-win-x64.zip`.
 - `package-release.bat` kills any running app instance before publishing/signing. After a successful package run has copied `build\SethsAIUsageMonitor.exe`, restart that copied build executable so the tray app is running again for the user.
