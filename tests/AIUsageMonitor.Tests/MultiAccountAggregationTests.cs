@@ -1,5 +1,6 @@
 using System.IO;
 using System.Net.Http;
+using System.Text.Json.Nodes;
 using AIUsageMonitor.Collectors;
 using AIUsageMonitor.Models;
 using AIUsageMonitor.Services;
@@ -58,20 +59,15 @@ public sealed class MultiAccountAggregationTests
     [TestMethod]
     public void ActiveManagedAccountTakesOverTheSlotCardAndIsNotDuplicated()
     {
-        using var context = AggregatorContext.CreateWithDefaultCollectors(settings =>
-        {
-            settings.ProviderAccounts.Add(new ProviderAccount
+        using var context = AggregatorContext.CreateWithDefaultCollectors(
+            settings =>
             {
-                Id = ProviderAccount.DefaultAnthropicAccountId,
-                ProviderName = KnownProviders.Anthropic,
-                Label = ProviderAccount.DefaultAccountLabel,
-                IsDefault = true,
-                AccountUuid = "uuid-work"
-            });
-            var work = CreateManagedAccount("work", "Work");
-            work.AccountUuid = "uuid-work";
-            settings.ProviderAccounts.Add(work);
-        });
+                settings.ProviderAccounts.Add(CreateDefaultAccount("uuid-work"));
+                var work = CreateManagedAccount("work", "Work");
+                work.AccountUuid = "uuid-work";
+                settings.ProviderAccounts.Add(work);
+            },
+            home => WriteSlotLogin(home, "uuid-work", "work@example.com"));
 
         var providerNames = context.Aggregator.ProviderNames.ToList();
 
@@ -79,6 +75,74 @@ public sealed class MultiAccountAggregationTests
             string.Equals(name, "Anthropic - Work", StringComparison.OrdinalIgnoreCase)),
             "the active managed account must appear exactly once (via the ~/.claude slot)");
         CollectionAssert.DoesNotContain(providerNames, KnownProviders.Anthropic);
+    }
+
+    [TestMethod]
+    public void SlotLoginChangedOutsideTheAppRekeysCardsInsteadOfDuplicatingThem()
+    {
+        // Settings still say the slot holds Work (the last value the app saw) while the
+        // user has since logged ~/.claude into Personal from the VS Code extension.
+        using var context = AggregatorContext.CreateWithDefaultCollectors(
+            settings =>
+            {
+                settings.ProviderAccounts.Add(CreateDefaultAccount("uuid-work"));
+                var work = CreateManagedAccount("work", "Work");
+                work.AccountUuid = "uuid-work";
+                settings.ProviderAccounts.Add(work);
+                var personal = CreateManagedAccount("personal", "Personal");
+                personal.AccountUuid = "uuid-personal";
+                settings.ProviderAccounts.Add(personal);
+            },
+            home => WriteSlotLogin(home, "uuid-personal", "personal@example.com"));
+
+        var providerNames = context.Aggregator.ProviderNames.ToList();
+
+        Assert.AreEqual(1, providerNames.Count(name => name == "Anthropic - Personal"),
+            "the account now in the slot owns the slot card");
+        Assert.AreEqual(1, providerNames.Count(name => name == "Anthropic - Work"),
+            "the account that moved out of the slot must still be collected from its own dir");
+        CollectionAssert.DoesNotContain(providerNames, KnownProviders.Anthropic);
+    }
+
+    [TestMethod]
+    public void LoggedOutSlotCollectsEveryManagedAccountFromItsOwnDir()
+    {
+        using var context = AggregatorContext.CreateWithDefaultCollectors(settings =>
+        {
+            settings.ProviderAccounts.Add(CreateDefaultAccount("uuid-work"));
+            var work = CreateManagedAccount("work", "Work");
+            work.AccountUuid = "uuid-work";
+            settings.ProviderAccounts.Add(work);
+        });
+
+        var providerNames = context.Aggregator.ProviderNames.ToList();
+
+        CollectionAssert.Contains(providerNames, KnownProviders.Anthropic);
+        Assert.AreEqual(1, providerNames.Count(name => name == "Anthropic - Work"),
+            "a stale stored uuid must not hide an account when ~/.claude has no login at all");
+    }
+
+    [TestMethod]
+    public void EveryAnthropicProviderKeyIsUnique()
+    {
+        using var context = AggregatorContext.CreateWithDefaultCollectors(
+            settings =>
+            {
+                settings.ProviderAccounts.Add(CreateDefaultAccount("uuid-work"));
+                var work = CreateManagedAccount("work", "Work");
+                work.AccountUuid = "uuid-work";
+                settings.ProviderAccounts.Add(work);
+                // The same login saved twice under two labels still gets two distinct card
+                // keys, and one key is never handed to two collectors.
+                var duplicate = CreateManagedAccount("work-again", "Work Again");
+                duplicate.AccountUuid = "uuid-work";
+                settings.ProviderAccounts.Add(duplicate);
+            },
+            home => WriteSlotLogin(home, "uuid-work", "work@example.com"));
+
+        var providerNames = context.Aggregator.ProviderNames.ToList();
+
+        CollectionAssert.AllItemsAreUnique(providerNames);
     }
 
     [TestMethod]
@@ -181,6 +245,47 @@ public sealed class MultiAccountAggregationTests
         Assert.AreEqual(1, viewModel.Providers.Count, "re-applying the account must replace all of its cards");
     }
 
+    private static ProviderAccount CreateDefaultAccount(string accountUuid)
+    {
+        return new ProviderAccount
+        {
+            Id = ProviderAccount.DefaultAnthropicAccountId,
+            ProviderName = KnownProviders.Anthropic,
+            Label = ProviderAccount.DefaultAccountLabel,
+            IsDefault = true,
+            AccountUuid = accountUuid
+        };
+    }
+
+    // Writes the two files a real ~/.claude login leaves behind: the token, and the
+    // oauthAccount block the CLI caches next to it.
+    private static void WriteSlotLogin(string homeDirectory, string accountUuid, string email)
+    {
+        var claudeDirectory = Path.Combine(homeDirectory, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+
+        var credentials = new JsonObject
+        {
+            ["claudeAiOauth"] = new JsonObject
+            {
+                ["accessToken"] = $"token-{accountUuid}",
+                ["refreshToken"] = $"refresh-{accountUuid}",
+                ["expiresAt"] = DateTimeOffset.UtcNow.AddHours(4).ToUnixTimeMilliseconds()
+            }
+        };
+        File.WriteAllText(Path.Combine(claudeDirectory, ".credentials.json"), credentials.ToJsonString());
+
+        var claudeJson = new JsonObject
+        {
+            ["oauthAccount"] = new JsonObject
+            {
+                ["accountUuid"] = accountUuid,
+                ["emailAddress"] = email
+            }
+        };
+        File.WriteAllText(Path.Combine(homeDirectory, ".claude.json"), claudeJson.ToJsonString());
+    }
+
     private static ProviderAccount CreateManagedAccount(string idSuffix, string label)
     {
         return new ProviderAccount
@@ -254,7 +359,9 @@ public sealed class MultiAccountAggregationTests
 
         public UsageAggregatorService Aggregator { get; }
 
-        public static AggregatorContext CreateWithDefaultCollectors(Action<AppSettings> configureSettings)
+        public static AggregatorContext CreateWithDefaultCollectors(
+            Action<AppSettings> configureSettings,
+            Action<string>? configureHomeDirectory = null)
         {
             var tempDirectory = CreateTempDirectory();
             var settingsService = new AppSettingsService(tempDirectory);
@@ -262,7 +369,18 @@ public sealed class MultiAccountAggregationTests
             configureSettings(settings);
             settingsService.Save(settings);
 
-            var aggregator = new UsageAggregatorService(new AppLogService(tempDirectory), settingsService);
+            // A fake home dir keeps the slot identity (and so which account owns the slot
+            // card) deterministic instead of depending on the developer's own login.
+            var homeDirectory = Path.Combine(tempDirectory, "home");
+            Directory.CreateDirectory(homeDirectory);
+            configureHomeDirectory?.Invoke(homeDirectory);
+
+            var logService = new AppLogService(tempDirectory);
+            var aggregator = new UsageAggregatorService(
+                logService,
+                settingsService,
+                collectors: null,
+                new ClaudeSlotIdentityService(logService, accountManager: null, homeDirectory));
             return new AggregatorContext(tempDirectory, aggregator);
         }
 

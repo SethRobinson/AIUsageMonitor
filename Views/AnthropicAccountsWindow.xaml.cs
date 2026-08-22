@@ -29,6 +29,7 @@ public partial class AnthropicAccountsWindow : Window
     private readonly AppSettingsService _settingsService;
     private readonly AnthropicAccountManagerService _accountManager;
     private readonly ClaudeAccountSwitchService _switchService;
+    private readonly ClaudeSlotIdentityService? _slotIdentityService;
 
     private CancellationTokenSource? _loginCancellation;
     private string _activeAccountUuid = string.Empty;
@@ -40,6 +41,9 @@ public partial class AnthropicAccountsWindow : Window
         _settingsService = settingsService;
         _accountManager = new AnthropicAccountManagerService(settingsService, logService);
         _switchService = new ClaudeAccountSwitchService(settingsService, logService, _accountManager);
+        _slotIdentityService = screenshotMode
+            ? null
+            : new ClaudeSlotIdentityService(logService, _accountManager);
 
         if (screenshotMode)
         {
@@ -55,6 +59,9 @@ public partial class AnthropicAccountsWindow : Window
             return;
         }
 
+        // Seed from what the CLI itself cached so the rows are right immediately, then
+        // confirm over the network; the stored uuid alone can be a login old.
+        _activeAccountUuid = _slotIdentityService?.GetIdentity()?.Uuid ?? string.Empty;
         RebuildAccountRows();
         _ = DetectActiveAccountAsync();
     }
@@ -201,18 +208,14 @@ public partial class AnthropicAccountsWindow : Window
 
     private async Task DetectActiveAccountAsync()
     {
-        var credentialsPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude",
-            ".credentials.json");
-        if (!File.Exists(credentialsPath))
+        if (_slotIdentityService is null || !_slotIdentityService.HasLogin)
         {
             ActiveAccountTextBlock.Text = "Active claude CLI account: none (no ~/.claude login found).";
             return;
         }
 
-        var identity = await _accountManager.TryFetchIdentityAsync(credentialsPath, CancellationToken.None);
-        if (identity is null)
+        var identity = await _slotIdentityService.ResolveAsync(CancellationToken.None);
+        if (identity is null || string.IsNullOrWhiteSpace(identity.Uuid))
         {
             ActiveAccountTextBlock.Text = "Active claude CLI account: could not be checked right now.";
             return;
@@ -269,11 +272,11 @@ public partial class AnthropicAccountsWindow : Window
 
         var settings = _settingsService.Load();
         var accounts = settings.GetAccounts(KnownProviders.Anthropic);
-        var slotUuid = accounts.FirstOrDefault(account => account.IsDefault)?.AccountUuid;
-        if (string.IsNullOrWhiteSpace(slotUuid))
-        {
-            slotUuid = _activeAccountUuid;
-        }
+        // Live detection wins over the stored value: the CLI can be re-logged in from
+        // anywhere, and a stale uuid here badges the wrong row as active.
+        var slotUuid = string.IsNullOrWhiteSpace(_activeAccountUuid)
+            ? accounts.FirstOrDefault(account => account.IsDefault)?.AccountUuid
+            : _activeAccountUuid;
 
         var haveActiveIdentity = !string.IsNullOrWhiteSpace(slotUuid);
         var managedAccountIsActive = haveActiveIdentity && accounts.Any(account =>

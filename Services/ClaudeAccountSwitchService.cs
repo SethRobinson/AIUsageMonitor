@@ -290,86 +290,44 @@ public sealed class ClaudeAccountSwitchService
 
     private string HomeClaudeJsonPath => Path.Combine(_homeDirectory, ".claude.json");
 
-    private static string ManagedClaudeJsonPath(string configDir) => Path.Combine(configDir, ".claude.json");
+    private static string ManagedClaudeJsonPath(string configDir) => ClaudeIdentityFiles.ClaudeJsonPathFor(configDir);
 
-    // Copies the `oauthAccount` identity block from one .claude.json into another, leaving
-    // every other property of the destination file (projects, tips, onboarding state, ...)
-    // untouched. Returns false when the source has no block to copy.
     private bool TryCopyOAuthAccountBlock(string sourceClaudeJsonPath, string destinationClaudeJsonPath)
     {
-        try
+        if (ClaudeIdentityFiles.TryCopyOAuthAccountBlock(sourceClaudeJsonPath, destinationClaudeJsonPath, out var error))
         {
-            if (!File.Exists(sourceClaudeJsonPath))
-            {
-                return false;
-            }
-
-            if (JsonNode.Parse(File.ReadAllText(sourceClaudeJsonPath)) is not JsonObject sourceRoot ||
-                sourceRoot["oauthAccount"] is not JsonNode oauthAccount)
-            {
-                return false;
-            }
-
-            return TryWriteOAuthAccountBlock(destinationClaudeJsonPath, oauthAccount);
+            return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+
+        if (error is not null)
         {
             _logService.Error(
                 "Anthropic",
-                $"Could not copy the oauthAccount identity block from {sourceClaudeJsonPath} to {destinationClaudeJsonPath}: {ex.Message}");
-            return false;
+                $"Could not copy the oauthAccount identity block from {sourceClaudeJsonPath} to {destinationClaudeJsonPath}: {error}");
         }
+
+        return false;
     }
 
     private bool TryWriteOAuthAccountBlock(string destinationClaudeJsonPath, JsonNode oauthAccount)
     {
-        try
+        if (ClaudeIdentityFiles.TryWriteOAuthAccountBlock(destinationClaudeJsonPath, oauthAccount, out var error))
         {
-            JsonObject destinationRoot;
-            if (File.Exists(destinationClaudeJsonPath) &&
-                JsonNode.Parse(File.ReadAllText(destinationClaudeJsonPath)) is JsonObject existingRoot)
-            {
-                destinationRoot = existingRoot;
-            }
-            else
-            {
-                destinationRoot = [];
-            }
-
-            destinationRoot["oauthAccount"] = oauthAccount.DeepClone();
-
-            var tempPath = destinationClaudeJsonPath + ".tmp";
-            File.WriteAllText(tempPath, destinationRoot.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(tempPath, destinationClaudeJsonPath, overwrite: true);
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+
+        if (error is not null)
         {
             _logService.Error(
                 "Anthropic",
-                $"Could not write the oauthAccount identity block to {destinationClaudeJsonPath}: {ex.Message}");
-            return false;
+                $"Could not write the oauthAccount identity block to {destinationClaudeJsonPath}: {error}");
         }
+
+        return false;
     }
 
-    private static string? TryReadOAuthAccountUuid(string claudeJsonPath)
-    {
-        try
-        {
-            if (!File.Exists(claudeJsonPath))
-            {
-                return null;
-            }
-
-            return JsonNode.Parse(File.ReadAllText(claudeJsonPath)) is JsonObject root
-                ? root["oauthAccount"]?["accountUuid"]?.GetValue<string>()
-                : null;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
-        {
-            return null;
-        }
-    }
+    private static string? TryReadOAuthAccountUuid(string claudeJsonPath) =>
+        ClaudeIdentityFiles.TryReadOAuthAccountUuid(claudeJsonPath);
 
     private bool HomeOAuthBlockMatches(string accountUuid)
     {
@@ -431,24 +389,13 @@ public sealed class ClaudeAccountSwitchService
 
     private bool TryCopyCredentials(string sourcePath, string destinationPath)
     {
-        try
+        if (ClaudeIdentityFiles.TryCopyCredentials(sourcePath, destinationPath, out var error))
         {
-            var directory = Path.GetDirectoryName(destinationPath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var tempPath = destinationPath + ".tmp";
-            File.Copy(sourcePath, tempPath, overwrite: true);
-            File.Move(tempPath, destinationPath, overwrite: true);
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logService.Error("Anthropic", $"Could not copy credentials from {sourcePath} to {destinationPath}: {ex.Message}");
-            return false;
-        }
+
+        _logService.Error("Anthropic", $"Could not copy credentials from {sourcePath} to {destinationPath}: {error}");
+        return false;
     }
 
     private static void PruneBackups(string claudeDirectory, string prefix)

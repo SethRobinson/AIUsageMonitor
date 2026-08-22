@@ -16,13 +16,15 @@ public sealed class UsageAggregatorService
     private readonly Dictionary<string, CollectorFailureState> _failureStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _failureStateLock = new();
     private readonly ClaudeStatusFileUsageCollector? _defaultAnthropicCollector;
+    private readonly ClaudeSlotIdentityService? _slotIdentityService;
     private readonly Dictionary<string, AccountCollectorEntry> _anthropicAccountCollectors = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _accountCollectorLock = new();
 
     public UsageAggregatorService(
         AppLogService logService,
         AppSettingsService settingsService,
-        IReadOnlyList<IUsageCollector>? collectors = null)
+        IReadOnlyList<IUsageCollector>? collectors = null,
+        ClaudeSlotIdentityService? slotIdentityService = null)
     {
         _logService = logService;
         _settingsService = settingsService;
@@ -33,6 +35,9 @@ public sealed class UsageAggregatorService
             return;
         }
 
+        _slotIdentityService = slotIdentityService ?? new ClaudeSlotIdentityService(
+            logService,
+            new AnthropicAccountManagerService(settingsService, logService));
         _defaultAnthropicCollector = new ClaudeStatusFileUsageCollector();
         _collectors =
         [
@@ -107,6 +112,10 @@ public sealed class UsageAggregatorService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Settle which account ~/.claude is logged into before deciding which collectors
+        // run, so a login changed outside the app is honored on this very tick.
+        await SyncClaudeSlotIdentityAsync(cancellationToken).ConfigureAwait(false);
+
         var settings = _settingsService.Load();
         var enabledCollectors = GetEnabledCollectors(settings).ToList();
         RemoveDisabledFailureStates(enabledCollectors);
@@ -174,23 +183,27 @@ public sealed class UsageAggregatorService
         var accounts = settings.GetAccounts(KnownProviders.Anthropic);
         PruneRemovedAccountCollectors(accounts);
 
-        var defaultAccountUuid = accounts.FirstOrDefault(account => account.IsDefault)?.AccountUuid ?? string.Empty;
+        var slotAccountUuid = ResolveSlotAccountUuid(accounts);
 
         // When a managed account is the one currently logged into ~/.claude, the default
         // collector represents THAT account: it carries the managed account's key (so its
         // card keeps the account's name) and the managed dir's own collector is skipped
         // (its card would just duplicate the slot with staler tokens).
-        var activeManagedAccount = string.IsNullOrWhiteSpace(defaultAccountUuid)
+        var activeManagedAccount = string.IsNullOrWhiteSpace(slotAccountUuid)
             ? null
             : accounts.FirstOrDefault(account => !account.IsDefault &&
-                string.Equals(account.AccountUuid, defaultAccountUuid, StringComparison.OrdinalIgnoreCase));
+                string.Equals(account.AccountUuid, slotAccountUuid, StringComparison.OrdinalIgnoreCase));
+
+        // Two collectors sharing a key would clobber each other's card on every upsert, so
+        // a key is only ever handed out once no matter how the accounts are configured.
+        var yieldedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var account in accounts)
         {
             if (account.IsDefault)
             {
                 var effectiveAccount = activeManagedAccount ?? account;
-                if (!effectiveAccount.Enabled)
+                if (!effectiveAccount.Enabled || !yieldedKeys.Add(effectiveAccount.DisplayKey))
                 {
                     continue;
                 }
@@ -202,11 +215,116 @@ public sealed class UsageAggregatorService
             }
             else if (account.Enabled &&
                 !ReferenceEquals(account, activeManagedAccount) &&
-                !string.IsNullOrWhiteSpace(account.ConfigDir))
+                !string.IsNullOrWhiteSpace(account.ConfigDir) &&
+                yieldedKeys.Add(account.DisplayKey))
             {
                 yield return GetOrCreateAccountCollector(account);
             }
         }
+    }
+
+    // Which account owns the ~/.claude slot is detected from the slot itself, never from
+    // whatever uuid happened to be stored last: the user can re-login it from the CLI, the
+    // VS Code extension, or Claude Code without the app being told. A stale answer here
+    // labels the slot card with the wrong account AND skips the account that really moved,
+    // which looks exactly like two accounts reporting identical usage.
+    private string ResolveSlotAccountUuid(IReadOnlyList<ProviderAccount> accounts)
+    {
+        if (_slotIdentityService is not null)
+        {
+            var identity = _slotIdentityService.GetIdentity();
+            if (identity is not null && !string.IsNullOrWhiteSpace(identity.Uuid))
+            {
+                return identity.Uuid;
+            }
+
+            // No login in the slot at all means no managed account can be the active one;
+            // every account then collects from its own dir.
+            if (!_slotIdentityService.HasLogin)
+            {
+                return string.Empty;
+            }
+        }
+
+        // Slot is logged in but its identity could not be read (unreadable ~/.claude.json
+        // and no network): the last known value is the best guess available.
+        return accounts.FirstOrDefault(account => account.IsDefault)?.AccountUuid ?? string.Empty;
+    }
+
+    // Confirms the slot's identity against the profile endpoint, records it so the accounts
+    // window and tray menu agree with the cards, and mirrors the slot's rotating tokens back
+    // into the matching managed account dir.
+    private async Task SyncClaudeSlotIdentityAsync(CancellationToken cancellationToken)
+    {
+        if (_slotIdentityService is null)
+        {
+            return;
+        }
+
+        ClaudeSlotIdentityService.SlotIdentity? identity;
+        try
+        {
+            identity = await _slotIdentityService.ResolveAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logService.Error("Anthropic", $"Could not determine which account ~/.claude is logged into: {ex.Message}");
+            return;
+        }
+
+        if (identity is null || string.IsNullOrWhiteSpace(identity.Uuid))
+        {
+            return;
+        }
+
+        var settings = _settingsService.Load();
+        var accounts = settings.GetAccounts(KnownProviders.Anthropic);
+        var defaultAccount = accounts.FirstOrDefault(account => account.IsDefault);
+        if (defaultAccount is null)
+        {
+            return;
+        }
+
+        var uuidChanged = !string.Equals(defaultAccount.AccountUuid, identity.Uuid, StringComparison.OrdinalIgnoreCase);
+        if (uuidChanged ||
+            !string.Equals(defaultAccount.Email, identity.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            if (uuidChanged)
+            {
+                _logService.Info(
+                    "Anthropic",
+                    $"The Claude CLI account in ~/.claude is now {DescribeAccount(accounts, identity.Uuid, identity.Email)}" +
+                    $" (was {DescribeAccount(accounts, defaultAccount.AccountUuid, defaultAccount.Email)}).");
+            }
+
+            defaultAccount.AccountUuid = identity.Uuid;
+            defaultAccount.Email = identity.Email;
+            _settingsService.Save(settings);
+        }
+
+        var activeManagedAccount = accounts.FirstOrDefault(account => !account.IsDefault &&
+            string.Equals(account.AccountUuid, identity.Uuid, StringComparison.OrdinalIgnoreCase));
+        if (activeManagedAccount is not null)
+        {
+            _slotIdentityService.TryMirrorSlotCredentials(activeManagedAccount);
+        }
+    }
+
+    private static string DescribeAccount(IReadOnlyList<ProviderAccount> accounts, string uuid, string email)
+    {
+        if (string.IsNullOrWhiteSpace(uuid))
+        {
+            return "unknown";
+        }
+
+        var match = accounts.FirstOrDefault(account => !account.IsDefault &&
+            string.Equals(account.AccountUuid, uuid, StringComparison.OrdinalIgnoreCase));
+        var describedEmail = string.IsNullOrWhiteSpace(email) ? uuid : email;
+        return match is null ? describedEmail : $"'{match.Label}' ({describedEmail})";
     }
 
     private IUsageCollector GetOrCreateAccountCollector(ProviderAccount account)

@@ -248,6 +248,16 @@ public sealed class TrayIconService : IDisposable
         }
     }
 
+    // Accounts are owned by the accounts dialog and by the refresh loop (which keeps the
+    // ~/.claude slot identity current), never by this long-lived cached copy. Re-read them
+    // before saving or an unrelated write like a window move would roll them back, and the
+    // cards would go back to naming accounts by whichever login the app last happened to see.
+    private void SaveSettingsPreservingAccounts()
+    {
+        _settings.ProviderAccounts = _settingsService.Load().ProviderAccounts;
+        _settingsService.Save(_settings);
+    }
+
     private void SaveOverlayWindowPlacement(UsageOverlayWindow window)
     {
         if (_suspendOverlayPlacementSave)
@@ -263,7 +273,7 @@ public sealed class TrayIconService : IDisposable
         try
         {
             _settings.OverlayWindowPlacement = window.GetCurrentPlacement();
-            _settingsService.Save(_settings);
+            SaveSettingsPreservingAccounts();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
@@ -370,7 +380,7 @@ public sealed class TrayIconService : IDisposable
         var nonScaleSettingsChanged = HasNonScaleSettingsChanged(previousSettings, _settings) ||
             settingsWindow.AccountsRefreshRequested;
         EndOverlayScalePreview();
-        _settingsService.Save(_settings);
+        SaveSettingsPreservingAccounts();
 
         if (nonScaleSettingsChanged)
         {

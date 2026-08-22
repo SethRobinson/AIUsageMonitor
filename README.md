@@ -18,7 +18,7 @@ Monitor multiple Claude accounts side by side, each with its own overlay card, a
 
 # Download #
 
-Current version: V1.16, latest updated July 19, 2026.
+Current version: V1.17, latest updated August 22, 2026.
 
 **[Download for Windows - Code signed by me, Seth A. Robinson](https://rtsoft.com/files/SethsAIUsageMonitor-win-x64.zip)**
 
