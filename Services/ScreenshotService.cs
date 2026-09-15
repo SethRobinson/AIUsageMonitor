@@ -210,6 +210,36 @@ internal static class ScreenshotService
         }
     }
 
+    public static void SaveOpenAiAccountsScreenshot(string outputPath, double? requestedWidth = null, double? requestedHeight = null)
+    {
+        var fullPath = Path.GetFullPath(outputPath);
+        var outputDirectory = Path.GetDirectoryName(fullPath);
+        if (outputDirectory is not null) Directory.CreateDirectory(outputDirectory);
+        var tempDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.OpenAiScreenshot", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        var settings = new AppSettings { OpenAiUseSavedAccounts = true };
+        foreach (var label in new[] { "Seth", "Work" })
+            settings.ProviderAccounts.Add(new ProviderAccount { Id = "openai-demo-" + label, ProviderName = KnownProviders.OpenAI, Label = label, Email = label.ToLowerInvariant() + "@example.com", ConfigDir = Path.Combine(tempDirectory, label) });
+        var service = new AppSettingsService(tempDirectory);
+        service.Save(settings);
+        var window = new OpenAiAccountsWindow(service)
+        {
+            Left = 0, Top = 0, Topmost = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.Manual,
+            Width = requestedWidth ?? 620, Height = requestedHeight ?? 540
+        };
+        try
+        {
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var bitmap = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth), (int)Math.Ceiling(window.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(window);
+            SaveBitmap(bitmap, fullPath, outputDirectory);
+        }
+        finally { window.Close(); Directory.Delete(tempDirectory, recursive: true); }
+    }
+
     private static void SaveBitmap(BitmapSource bitmap, string fullPath, string? outputDirectory)
     {
         var encoder = new PngBitmapEncoder();
@@ -250,6 +280,7 @@ internal static class ScreenshotService
                 {
                     Name = provider.Name,
                     SourceProviderName = provider.SourceProviderName,
+                    AccountLabel = provider.AccountLabel,
                     PlanName = provider.PlanName,
                     Source = provider.Source,
                     StatusMessage = provider.StatusMessage,

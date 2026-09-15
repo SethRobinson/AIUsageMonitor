@@ -123,6 +123,13 @@ internal static class LayoutSweepService
                 CreateProvider("Unavailable Provider With A Deliberately Long Name", 0, unavailable: true)
             ]),
             ["three-mixed"] = CreateMixedViewModel(),
+            ["multiple-accounts"] = CreateViewModel(
+            [
+                CreateAccountProvider("Anthropic - Seth", "Seth", fable: true),
+                CreateAccountProvider("Anthropic - Work", "Work", fable: true),
+                CreateAccountProvider("OpenAI - Seth", "Seth"),
+                CreateAccountProvider("OpenAI - Work", "Work")
+            ]),
             ["five-normal"] = CreateViewModel(
             [
                 CreateProvider("Anthropic - Corp", 2),
@@ -145,6 +152,13 @@ internal static class LayoutSweepService
                 .Select(index => CreateProvider($"Provider Account {index:00} With A Long Descriptive Label", 1 + index % 3))
                 .ToArray())
         };
+    }
+
+    private static ProviderUsage CreateAccountProvider(string name, string label, bool fable = false)
+    {
+        var windows = new List<UsageWindow> { new() { Title = "5h", Limit = 100, Used = 25, Remaining = 75, ResetAt = DateTimeOffset.Now.AddHours(3) } };
+        if (fable) windows.Add(new UsageWindow { Title = "Fable", DisplayGroupName = "Fable", Limit = 100, Used = 65, Remaining = 35, ResetAt = DateTimeOffset.Now.AddHours(6) });
+        return new ProviderUsage { Name = name, AccountLabel = label, PlanName = "Demo", Source = "Layout sweep fake data", Windows = windows };
     }
 
     private static UsageOverlayViewModel CreateMixedViewModel()
@@ -205,7 +219,7 @@ internal static class LayoutSweepService
             }
         }
 
-        var targetedScenarios = new[] { "empty", "single-unavailable", "three-mixed", "seven-dense", "twelve-long" };
+        var targetedScenarios = new[] { "empty", "single-unavailable", "three-mixed", "seven-dense", "twelve-long", "multiple-accounts" };
         foreach (var scenario in targetedScenarios)
         {
             if (!scenarios.ContainsKey(scenario))

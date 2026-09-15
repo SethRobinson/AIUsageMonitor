@@ -19,7 +19,7 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         SourceProviderName = string.IsNullOrWhiteSpace(usage.SourceProviderName)
             ? ShortName
             : usage.SourceProviderName.Trim();
-        ConstrainedShortName = GetConstrainedShortName(ShortName, SourceProviderName);
+        ConstrainedShortName = GetConstrainedShortName(ShortName, SourceProviderName, usage.AccountLabel);
         Name = FormatDisplayName(ShortName, usage.PlanName);
         Source = usage.Source;
         StatusMessage = usage.StatusMessage;
@@ -183,7 +183,7 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         return $"{providerName} ({planName})";
     }
 
-    private static string GetConstrainedShortName(string providerName, string sourceProviderName)
+    private static string GetConstrainedShortName(string providerName, string sourceProviderName, string accountLabel)
     {
         if (string.IsNullOrWhiteSpace(sourceProviderName) ||
             string.Equals(providerName, sourceProviderName, StringComparison.OrdinalIgnoreCase) ||
@@ -193,7 +193,8 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         }
 
         var suffix = providerName[sourceProviderName.Length..].Trim();
-        return string.IsNullOrWhiteSpace(suffix) ? providerName : suffix;
+        return string.IsNullOrWhiteSpace(suffix) ? providerName
+            : string.IsNullOrWhiteSpace(accountLabel) ? suffix : $"{suffix} - {accountLabel.Trim()}";
     }
 
     private static string GetUnavailableSummary(string statusMessage)

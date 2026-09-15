@@ -254,8 +254,7 @@ public sealed class TrayIconService : IDisposable
     // cards would go back to naming accounts by whichever login the app last happened to see.
     private void SaveSettingsPreservingAccounts()
     {
-        _settings.ProviderAccounts = _settingsService.Load().ProviderAccounts;
-        _settingsService.Save(_settings);
+        _settingsService.SavePreservingAccounts(_settings);
     }
 
     private void SaveOverlayWindowPlacement(UsageOverlayWindow window)
@@ -428,6 +427,7 @@ public sealed class TrayIconService : IDisposable
                previousSettings.AutoRunAtLoginEnabled != nextSettings.AutoRunAtLoginEnabled ||
                !EnabledProvidersEqual(previousSettings.EnabledProviders, nextSettings.EnabledProviders) ||
                !ProviderAccountsEqual(previousSettings.ProviderAccounts, nextSettings.ProviderAccounts) ||
+               previousSettings.OpenAiUseSavedAccounts != nextSettings.OpenAiUseSavedAccounts ||
                !string.Equals(previousSettings.CursorUsageMode, nextSettings.CursorUsageMode, StringComparison.Ordinal) ||
                !string.Equals(previousSettings.CursorApiKey, nextSettings.CursorApiKey, StringComparison.Ordinal) ||
                Math.Abs(previousSettings.CursorIncludedBudgetDollars - nextSettings.CursorIncludedBudgetDollars) > 0.001 ||

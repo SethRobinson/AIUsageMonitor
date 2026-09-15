@@ -33,6 +33,7 @@ public partial class SettingsWindow : Window
         UpdateAnthropicApiCreditsSummary();
         UpdateCursorModeSummary();
         UpdateAnthropicAccountsSummary();
+        UpdateOpenAiAccountsSummary();
         ClaudeStatusExporterCheckBox.IsChecked = Settings.ClaudeStatusExporterEnabled;
         AutoRunAtLoginCheckBox.IsChecked = Settings.AutoRunAtLoginEnabled || Services.AutoRunService.IsEnabled();
         DiagnosticLoggingCheckBox.IsChecked = Settings.DiagnosticLoggingEnabled;
@@ -127,6 +128,25 @@ public partial class SettingsWindow : Window
         UpdateAnthropicAccountsSummary();
     }
 
+    private void OpenAiAccountsButtonOnClick(object sender, RoutedEventArgs e)
+    {
+        ApplySettingsFromControls();
+        var window = new OpenAiAccountsWindow(_settingsService) { Owner = this };
+        window.ShowDialog();
+        AccountsRefreshRequested |= window.RefreshRequested;
+        MergeSavedProviderAccounts();
+        UpdateOpenAiAccountsSummary();
+    }
+
+    private void UpdateOpenAiAccountsSummary()
+    {
+        var accounts = Settings.GetAccounts(KnownProviders.OpenAI);
+        OpenAiAccountsSummaryTextBlock.Text = !Settings.OpenAiUseSavedAccounts
+            ? "Automatic: current Codex login. Use Accounts to save independent logins."
+            : accounts.Count == 0 ? "No saved accounts. Use Accounts to add one."
+            : $"{accounts.Count(account => account.Enabled)} of {accounts.Count} saved accounts enabled: {string.Join(", ", accounts.Select(account => account.Label))}.";
+    }
+
     private void ProviderSetupButtonOnClick(object sender, RoutedEventArgs e)
     {
         if (sender is not WpfButton { Tag: string providerName })
@@ -143,7 +163,7 @@ public partial class SettingsWindow : Window
                 "https://docs.claude.com/en/docs/claude-code/setup"),
             KnownProviders.OpenAI => new ProviderSetupInfo(
                 "OpenAI Setup",
-                "Install the Codex CLI or Codex app, open Codex, and sign in. Seth's AI Usage Monitor reads quota snapshots from local Codex session logs.",
+                "For multiple accounts, install the Codex CLI, then use OpenAI > Accounts to sign into each account separately. Saved accounts are tracked independently of your Codex login. Until you save an account, automatic monitoring reads local Codex session logs.",
                 "Open Codex",
                 OpenAiCodexLauncherService.SetupUrl,
                 OpenCodex),
@@ -351,7 +371,7 @@ public partial class SettingsWindow : Window
     private void MergeSavedProviderAccounts()
     {
         var savedSettings = _settingsService.Load();
-        Settings.ProviderAccounts = savedSettings.ProviderAccounts.Select(account => account.Clone()).ToList();
+        Settings.CopyAccountSettingsFrom(savedSettings);
     }
 
     private void UpdateAnthropicAccountsSummary()

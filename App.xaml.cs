@@ -34,6 +34,13 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (TryGetNamedScreenshotOptions(e.Args, "--screenshot-openai-accounts", out var openAiPath, out var openAiWidth, out var openAiHeight))
+        {
+            try { ScreenshotService.SaveOpenAiAccountsScreenshot(openAiPath, openAiWidth, openAiHeight); Shutdown(); }
+            catch (Exception exception) { Console.Error.WriteLine($"Could not save OpenAI accounts screenshot: {exception.Message}"); Shutdown(1); }
+            return;
+        }
+
         if (TryGetNamedScreenshotOptions(e.Args, "--screenshot-accounts", out var accountsScreenshotPath, out var accountsScreenshotWidth, out var accountsScreenshotHeight))
         {
             try

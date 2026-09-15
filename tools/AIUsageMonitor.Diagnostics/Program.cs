@@ -129,6 +129,11 @@ internal static class DiagnosticsProgram
                     string.Equals(account.Id, options.Account, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(account.Label, options.Account, StringComparison.OrdinalIgnoreCase);
             }
+            // Account filters must not accidentally run an unrelated automatic provider.
+            foreach (var providerName in KnownProviders.All)
+                settings.SetProviderEnabled(providerName, settings.IsProviderEnabled(providerName) &&
+                    settings.GetAccounts(providerName).Any(account => account.Enabled));
+            if (settings.IsProviderEnabled(KnownProviders.OpenAI)) settings.OpenAiUseSavedAccounts = true;
         }
 
         filteredSettingsService.Save(settings);
@@ -289,6 +294,7 @@ internal static class DiagnosticsProgram
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --timeout-seconds 120");
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --provider Anthropic --force-refresh --timeout-seconds 120");
         Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --provider Anthropic --account Work --timeout-seconds 120");
+        Console.Error.WriteLine("  AIUsageMonitor.Diagnostics refresh --live --provider OpenAI --account Work --force-refresh --timeout-seconds 120");
     }
 }
 

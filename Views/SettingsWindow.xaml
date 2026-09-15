@@ -236,12 +236,14 @@
                                                           FontSize="13"
                                                           FontWeight="SemiBold" />
                                                 <TextBlock Margin="24,4,0,0"
-                                                           Text="Codex local session logs and CLI quota refreshes."
+                                                           Text="Codex subscription usage, with independent saved accounts."
                                                            Foreground="#8B93A1"
                                                            FontSize="12"
                                                            TextWrapping="Wrap" />
+                                                <TextBlock x:Name="OpenAiAccountsSummaryTextBlock" Margin="24,8,0,0" Foreground="#A8AFBA" FontSize="12" TextWrapping="Wrap" />
                                             </StackPanel>
-                                            <Button Grid.Column="1"
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Top">
+                                                <Button
                                                     Width="82"
                                                     Height="30"
                                                     Margin="12,0,0,0"
@@ -249,6 +251,8 @@
                                                     Content="Setup"
                                                     Tag="OpenAI"
                                                     Click="ProviderSetupButtonOnClick" />
+                                                <Button Width="82" Height="30" Margin="12,6,0,0" Content="Accounts" Click="OpenAiAccountsButtonOnClick" />
+                                            </StackPanel>
                                         </Grid>
                                     </Border>
 

@@ -2,122 +2,147 @@
   "generatedAt": "2026-05-23T01:30:00+09:00",
   "providers": [
     {
-      "name": "Anthropic",
+      "name": "Anthropic - Seth",
       "planName": "Max 20x",
       "source": "Fake data",
       "windows": [
-      {
-        "title": "5h",
-        "limit": 100,
-        "used": 1,
-        "remaining": 99,
-        "resetAt": "2026-05-23T05:30:00+09:00"
-      },
-      {
-        "title": "7d",
-        "limit": 100,
-        "used": 12,
-        "remaining": 88,
-        "resetAt": "2026-05-23T02:05:00+09:00"
-      },
-      {
-        "title": "Fable",
-        "displayGroupName": "Fable",
-        "limit": 100,
-        "used": 100,
-        "remaining": 0,
-        "resetAt": "2026-05-23T15:30:00+09:00"
-      },
-      {
-        "title": "Extra usage",
-        "displayGroupName": "Fable",
-        "limit": 50,
-        "used": 10,
-        "remaining": 40,
-        "remainingText": "$10 of $50",
-        "detail": "Monthly spend limit",
-        "hideReset": true
-      }
-      ]
+        {
+          "title": "5h",
+          "limit": 100,
+          "used": 1,
+          "remaining": 99,
+          "resetAt": "2026-05-23T05:30:00+09:00"
+        },
+        {
+          "title": "7d",
+          "limit": 100,
+          "used": 12,
+          "remaining": 88,
+          "resetAt": "2026-05-23T02:05:00+09:00"
+        },
+        {
+          "title": "Fable",
+          "displayGroupName": "Fable",
+          "limit": 100,
+          "used": 65,
+          "remaining": 35,
+          "resetAt": "2026-05-23T15:30:00+09:00"
+        },
+        {
+          "title": "Extra usage",
+          "displayGroupName": "Fable",
+          "limit": 50,
+          "used": 10,
+          "remaining": 40,
+          "remainingText": "$10 of $50",
+          "detail": "Monthly spend limit",
+          "hideReset": true
+        }
+      ],
+      "accountLabel": "Seth"
     },
     {
       "name": "Anthropic - Work",
       "planName": "Max 5x",
       "source": "Fake data",
       "windows": [
-      {
-        "title": "5h",
-        "limit": 100,
-        "used": 43,
-        "remaining": 57,
-        "resetAt": "2026-05-23T04:00:00+09:00"
-      },
-      {
-        "title": "7d",
-        "limit": 100,
-        "used": 68,
-        "remaining": 32,
-        "resetAt": "2026-05-25T01:30:00+09:00"
-      }
-      ]
+        {
+          "title": "5h",
+          "limit": 100,
+          "used": 43,
+          "remaining": 57,
+          "resetAt": "2026-05-23T04:00:00+09:00"
+        },
+        {
+          "title": "7d",
+          "limit": 100,
+          "used": 68,
+          "remaining": 32,
+          "resetAt": "2026-05-25T01:30:00+09:00"
+        }
+      ],
+      "accountLabel": "Work"
     },
     {
       "name": "Anthropic API Credits",
       "source": "Fake data",
       "statusMessage": "Anthropic Console prepaid API credit balance.",
       "windows": [
-      {
-        "title": "Prepaid credits",
-        "limit": 100,
-        "used": 0,
-        "remaining": 100,
-        "remainingText": "$170.00 left",
-        "detail": "Seth; $25.00 expires Aug 1; verified now",
-        "hideReset": true,
-        "isBalance": true
-      }
+        {
+          "title": "Prepaid credits",
+          "limit": 100,
+          "used": 0,
+          "remaining": 100,
+          "remainingText": "$170.00 left",
+          "detail": "Seth; $25.00 expires Aug 1; verified now",
+          "hideReset": true,
+          "isBalance": true
+        }
       ]
     },
     {
-      "name": "OpenAI",
+      "name": "OpenAI - Seth",
       "planName": "Pro",
       "source": "Fake data",
       "windows": [
-      {
-        "title": "5h",
-        "limit": 100,
-        "used": 26,
-        "remaining": 74,
-        "resetAt": "2026-05-23T04:30:00+09:00"
-      },
-      {
-        "title": "7d",
-        "limit": 100,
-        "used": 39,
-        "remaining": 61,
-        "resetAt": "2026-05-26T01:30:00+09:00"
-      }
-      ]
+        {
+          "title": "5h",
+          "limit": 100,
+          "used": 26,
+          "remaining": 74,
+          "resetAt": "2026-05-23T04:30:00+09:00"
+        },
+        {
+          "title": "7d",
+          "limit": 100,
+          "used": 39,
+          "remaining": 61,
+          "resetAt": "2026-05-26T01:30:00+09:00"
+        }
+      ],
+      "accountLabel": "Seth"
+    },
+    {
+      "name": "OpenAI - Work",
+      "planName": "Plus",
+      "source": "Fake data",
+      "windows": [
+        {
+          "title": "5h",
+          "limit": 100,
+          "used": 65,
+          "remaining": 35,
+          "resetAt": "2026-05-23T04:30:00+09:00"
+        },
+        {
+          "title": "7d",
+          "limit": 100,
+          "used": 20,
+          "remaining": 80,
+          "resetAt": "2026-05-26T01:30:00+09:00"
+        }
+      ],
+      "accountLabel": "Work"
     },
     {
       "name": "Antigravity",
       "planName": "Google AI Pro",
       "source": "Fake data",
       "windows": [
-      {
-        "title": "Gemini Flash",
-        "limit": 100,
-        "used": 9,
-        "remaining": 91,
-        "resetAt": "2026-05-23T06:30:00+09:00"
-      },
-      {
-        "title": "Gemini Pro",
-        "limit": 100,
-        "used": 22,
-        "remaining": 78,
-        "resetAt": "2026-05-23T06:30:00+09:00"
-      }
+        {
+          "title": "Gemini Flash",
+          "limit": 100,
+          "used": 9,
+          "remaining": 91,
+          "resetAt": "2026-05-23T06:30:00+09:00"
+        },
+        {
+          "title": "Gemini Pro",
+          "limit": 100,
+          "used": 22,
+          "remaining": 78,
+          "resetAt": "2026-05-23T06:30:00+09:00"
+        }
       ]
     },
     {
@@ -125,20 +150,20 @@
       "planName": "Google One AI Pro",
       "source": "Fake data",
       "windows": [
-      {
-        "title": "Gemini Flash",
-        "limit": 100,
-        "used": 0,
-        "remaining": 100,
-        "resetAt": "2026-05-24T01:30:00+09:00"
-      },
-      {
-        "title": "Gemini Pro",
-        "limit": 100,
-        "used": 0,
-        "remaining": 100,
-        "resetAt": "2026-05-24T01:30:00+09:00"
-      }
+        {
+          "title": "Gemini Flash",
+          "limit": 100,
+          "used": 0,
+          "remaining": 100,
+          "resetAt": "2026-05-24T01:30:00+09:00"
+        },
+        {
+          "title": "Gemini Pro",
+          "limit": 100,
+          "used": 0,
+          "remaining": 100,
+          "resetAt": "2026-05-24T01:30:00+09:00"
+        }
       ]
     },
     {
@@ -146,13 +171,13 @@
       "planName": "Ultra",
       "source": "Fake data",
       "windows": [
-      {
-        "title": "On-demand",
-        "limit": 100,
-        "used": 0,
-        "remaining": 100,
-        "resetAt": "2026-06-16T01:30:00+09:00"
-      }
+        {
+          "title": "On-demand",
+          "limit": 100,
+          "used": 0,
+          "remaining": 100,
+          "resetAt": "2026-06-16T01:30:00+09:00"
+        }
       ]
     }
   ]

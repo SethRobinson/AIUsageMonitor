@@ -19,15 +19,19 @@ public sealed class UsageAggregatorService
     private readonly ClaudeSlotIdentityService? _slotIdentityService;
     private readonly Dictionary<string, AccountCollectorEntry> _anthropicAccountCollectors = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _accountCollectorLock = new();
+    private readonly Dictionary<string, AccountCollectorEntry> _openAiAccountCollectors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<ProviderAccount, IUsageCollector> _openAiCollectorFactory;
 
     public UsageAggregatorService(
         AppLogService logService,
         AppSettingsService settingsService,
         IReadOnlyList<IUsageCollector>? collectors = null,
-        ClaudeSlotIdentityService? slotIdentityService = null)
+        ClaudeSlotIdentityService? slotIdentityService = null,
+        Func<ProviderAccount, IUsageCollector>? openAiCollectorFactory = null)
     {
         _logService = logService;
         _settingsService = settingsService;
+        _openAiCollectorFactory = openAiCollectorFactory ?? (account => new OpenAiAccountUsageCollector(account));
 
         if (collectors is not null)
         {
@@ -171,11 +175,43 @@ public sealed class UsageAggregatorService
                     yield return accountCollector;
                 }
             }
+            else if (collector is CodexLogUsageCollector && settings.OpenAiUseSavedAccounts)
+            {
+                foreach (var accountCollector in ResolveOpenAiAccountCollectors(settings))
+                {
+                    yield return accountCollector;
+                }
+            }
             else
             {
                 yield return collector;
             }
         }
+    }
+
+    private IReadOnlyList<IUsageCollector> ResolveOpenAiAccountCollectors(AppSettings settings)
+    {
+        var accounts = settings.GetAccounts(KnownProviders.OpenAI).Where(account => !account.IsDefault).ToList();
+        var result = new List<IUsageCollector>();
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        lock (_accountCollectorLock)
+        {
+            foreach (var removed in _openAiAccountCollectors.Keys.Except(accounts.Select(account => account.Id), StringComparer.OrdinalIgnoreCase).ToList())
+                _openAiAccountCollectors.Remove(removed);
+            foreach (var account in accounts.Where(account => account.Enabled && !string.IsNullOrWhiteSpace(account.ConfigDir)))
+            {
+                if (!keys.Add(account.DisplayKey)) continue;
+                var fingerprint = $"{account.ConfigDir}|{account.DisplayKey}|{account.AccountUuid}";
+                if (!_openAiAccountCollectors.TryGetValue(account.Id, out var entry) || entry.Fingerprint != fingerprint)
+                {
+                    entry = new AccountCollectorEntry(fingerprint, new AccountScopedUsageCollector(
+                        _openAiCollectorFactory(account), account.DisplayKey, KnownProviders.OpenAI, account.CardLabel));
+                    _openAiAccountCollectors[account.Id] = entry;
+                }
+                result.Add(entry.Collector);
+            }
+        }
+        return result;
     }
 
     private IEnumerable<IUsageCollector> ResolveAnthropicAccountCollectors(AppSettings settings)
@@ -211,7 +247,7 @@ public sealed class UsageAggregatorService
                 // The wrapper is stateless, so the inner collector's backoff state is shared.
                 yield return string.Equals(effectiveAccount.DisplayKey, KnownProviders.Anthropic, StringComparison.OrdinalIgnoreCase)
                     ? _defaultAnthropicCollector!
-                    : new AccountScopedUsageCollector(_defaultAnthropicCollector!, effectiveAccount.DisplayKey, KnownProviders.Anthropic);
+                    : new AccountScopedUsageCollector(_defaultAnthropicCollector!, effectiveAccount.DisplayKey, KnownProviders.Anthropic, effectiveAccount.CardLabel);
             }
             else if (account.Enabled &&
                 !ReferenceEquals(account, activeManagedAccount) &&
@@ -303,7 +339,11 @@ public sealed class UsageAggregatorService
 
             defaultAccount.AccountUuid = identity.Uuid;
             defaultAccount.Email = identity.Email;
-            _settingsService.Save(settings);
+            _settingsService.Update(current =>
+            {
+                var slot = current.ProviderAccounts.FirstOrDefault(account => account.IsDefault && account.ProviderName == KnownProviders.Anthropic);
+                if (slot is not null) { slot.AccountUuid = identity.Uuid; slot.Email = identity.Email; }
+            });
         }
 
         var activeManagedAccount = accounts.FirstOrDefault(account => !account.IsDefault &&
@@ -347,7 +387,8 @@ public sealed class UsageAggregatorService
                     allowCliRefresh: false,
                     tokenRefresher: new AnthropicOAuthTokenRefresher(logService: _logService)),
                 account.DisplayKey,
-                KnownProviders.Anthropic);
+                KnownProviders.Anthropic,
+                account.CardLabel);
             _anthropicAccountCollectors[account.Id] = new AccountCollectorEntry(fingerprint, collector);
             return collector;
         }

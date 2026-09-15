@@ -10,16 +10,19 @@ public sealed class AccountScopedUsageCollector : IForceRefreshUsageCollector
 {
     private readonly IUsageCollector _inner;
 
-    public AccountScopedUsageCollector(IUsageCollector inner, string accountKey, string baseProviderName)
+    public AccountScopedUsageCollector(IUsageCollector inner, string accountKey, string baseProviderName, string accountLabel = "")
     {
         _inner = inner;
         ProviderName = accountKey;
         BaseProviderName = baseProviderName;
+        AccountLabel = accountLabel;
     }
 
     public string ProviderName { get; }
 
     public string BaseProviderName { get; }
+
+    public string AccountLabel { get; }
 
     public async Task<ProviderUsage> CollectAsync(CancellationToken cancellationToken)
     {
@@ -36,6 +39,7 @@ public sealed class AccountScopedUsageCollector : IForceRefreshUsageCollector
         {
             Name = ProviderName,
             SourceProviderName = ProviderName,
+            AccountLabel = AccountLabel,
             PlanName = usage.PlanName,
             Source = usage.Source,
             StatusMessage = usage.StatusMessage,

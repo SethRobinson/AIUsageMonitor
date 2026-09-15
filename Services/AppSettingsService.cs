@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using AIUsageMonitor.Models;
 
@@ -17,6 +18,8 @@ public sealed class AppSettingsService
     };
 
     public string SettingsPath { get; }
+    private static readonly ConcurrentDictionary<string, object> SettingsLocks = new(StringComparer.OrdinalIgnoreCase);
+    private object SyncRoot => SettingsLocks.GetOrAdd(Path.GetFullPath(SettingsPath), _ => new object());
 
     public AppSettingsService(string? baseDirectory = null)
     {
@@ -31,6 +34,11 @@ public sealed class AppSettingsService
     }
 
     public AppSettings Load()
+    {
+        lock (SyncRoot) return LoadCore();
+    }
+
+    private AppSettings LoadCore()
     {
         if (!File.Exists(SettingsPath))
         {
@@ -47,8 +55,38 @@ public sealed class AppSettingsService
 
     public void Save(AppSettings settings)
     {
+        lock (SyncRoot) SaveCore(settings);
+    }
+
+    public void Update(Action<AppSettings> update)
+    {
+        lock (SyncRoot)
+        {
+            var settings = LoadCore();
+            update(settings);
+            SaveCore(settings);
+        }
+    }
+
+    public void SavePreservingAccounts(AppSettings settings)
+    {
+        lock (SyncRoot)
+        {
+            settings.CopyAccountSettingsFrom(LoadCore());
+            SaveCore(settings);
+        }
+    }
+
+    private void SaveCore(AppSettings settings)
+    {
         settings.Normalize();
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
-        File.WriteAllText(SettingsPath, json);
+        var temporary = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, json);
+            File.Move(temporary, SettingsPath, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 }

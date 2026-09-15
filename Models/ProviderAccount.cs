@@ -21,6 +21,12 @@ public sealed class ProviderAccount
 
     public string AccountUuid { get; set; } = string.Empty;
 
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string CardLabel => IsDefault && (string.IsNullOrWhiteSpace(Label) ||
+        string.Equals(Label.Trim(), DefaultAccountLabel, StringComparison.OrdinalIgnoreCase))
+        ? string.Empty
+        : string.IsNullOrWhiteSpace(Label) ? Id : Label.Trim();
+
     // Single source of truth for the per-account provider key used by the aggregator,
     // failure states, checking placeholders, and card upserts. The default account keeps
     // the bare provider name while unnamed (so existing installs see no change) but honors

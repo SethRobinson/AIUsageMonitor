@@ -6,6 +6,8 @@ public sealed class ProviderUsage
 
     public string SourceProviderName { get; init; } = string.Empty;
 
+    public string AccountLabel { get; init; } = string.Empty;
+
     public string PlanName { get; init; } = string.Empty;
 
     public string Source { get; init; } = string.Empty;

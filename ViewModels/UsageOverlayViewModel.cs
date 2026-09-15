@@ -184,6 +184,7 @@ public sealed class UsageOverlayViewModel : INotifyPropertyChanged
         {
             Name = name,
             SourceProviderName = sourceProviderName,
+            AccountLabel = provider.AccountLabel,
             PlanName = planName,
             Source = provider.Source,
             StatusMessage = provider.StatusMessage,

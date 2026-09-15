@@ -21,6 +21,8 @@ public sealed class AppSettings
 
     public List<ProviderAccount> ProviderAccounts { get; set; } = [];
 
+    public bool OpenAiUseSavedAccounts { get; set; }
+
     public string CursorUsageMode { get; set; } = string.Empty;
 
     public string CursorApiKey { get; set; } = string.Empty;
@@ -59,6 +61,7 @@ public sealed class AppSettings
             UiScalePercent = UiScalePercent,
             EnabledProviders = NormalizeEnabledProviders(EnabledProviders),
             ProviderAccounts = NormalizeProviderAccounts(ProviderAccounts, clone: true),
+            OpenAiUseSavedAccounts = OpenAiUseSavedAccounts,
             CursorUsageMode = CursorUsageMode,
             CursorApiKey = CursorApiKey,
             CursorIncludedBudgetDollars = CursorIncludedBudgetDollars,
@@ -75,6 +78,12 @@ public sealed class AppSettings
             AlwaysOnTop = AlwaysOnTop,
             OverlayWindowPlacement = OverlayWindowPlacement?.Clone() ?? new OverlayWindowPlacement()
         };
+    }
+
+    public void CopyAccountSettingsFrom(AppSettings saved)
+    {
+        ProviderAccounts = saved.ProviderAccounts.Select(account => account.Clone()).ToList();
+        OpenAiUseSavedAccounts = saved.OpenAiUseSavedAccounts;
     }
 
     public bool IsProviderEnabled(string providerName)
