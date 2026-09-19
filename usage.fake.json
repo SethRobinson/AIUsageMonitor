@@ -98,6 +98,16 @@
           "used": 39,
           "remaining": 61,
           "resetAt": "2026-05-26T01:30:00+09:00"
+        },
+        {
+          "title": "Credits",
+          "limit": 100,
+          "used": 0,
+          "remaining": 100,
+          "remainingText": "2,389 credits",
+          "detail": "Purchased credits, used after plan limits",
+          "hideReset": true,
+          "isBalance": true
         }
       ],
       "accountLabel": "Seth"

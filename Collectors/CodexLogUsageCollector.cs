@@ -172,6 +172,11 @@ public sealed class CodexLogUsageCollector : IUsageCollector
                 latest.Secondary.ResetsAt));
         }
 
+        if (latest.Credits?.ToWindow() is { } creditsWindow)
+        {
+            windows.Add(creditsWindow);
+        }
+
         var statusMessage = string.IsNullOrWhiteSpace(planName)
             ? "Codex quota from latest local token-count event."
             : $"Codex {planName} quota from latest local token-count event.";
@@ -265,7 +270,10 @@ public sealed class CodexLogUsageCollector : IUsageCollector
                 timestamp,
                 ParseWindow(rateLimits, "primary"),
                 ParseWindow(rateLimits, "secondary"),
-                TryGetString(rateLimits, "plan_type"));
+                TryGetString(rateLimits, "plan_type"))
+            {
+                Credits = CodexCredits.TryParse(rateLimits)
+            };
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or OverflowException or ArgumentOutOfRangeException)
         {
@@ -436,7 +444,8 @@ public sealed class CodexLogUsageCollector : IUsageCollector
             var ageMinutes = (now - latest.Timestamp).TotalMinutes;
             builder.AppendLine(
                 $"snapshot: timestampUtc={latest.Timestamp.ToUniversalTime():yyyy-MM-ddTHH:mm:ssZ}, " +
-                $"ageMinutes={ageMinutes:0.0}, plan={latest.PlanType ?? "(none)"}, file={latest.SourceFile ?? "(unknown)"}.");
+                $"ageMinutes={ageMinutes:0.0}, plan={latest.PlanType ?? "(none)"}, " +
+                $"credits={(latest.Credits is { IsActive: true } credits ? credits.FormatBalance() : "(none)")}, file={latest.SourceFile ?? "(unknown)"}.");
             AppendWindowDiagnostic(builder, "primary", latest.Primary, now);
             AppendWindowDiagnostic(builder, "secondary", latest.Secondary, now);
         }
@@ -471,6 +480,8 @@ public sealed class CodexLogUsageCollector : IUsageCollector
         string? PlanType)
     {
         public string? SourceFile { get; init; }
+
+        public CodexCredits? Credits { get; init; }
     }
 
     internal sealed record CodexWindow(double UsedPercent, int WindowMinutes, DateTimeOffset? ResetsAt);

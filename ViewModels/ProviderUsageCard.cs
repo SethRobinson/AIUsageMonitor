@@ -26,7 +26,9 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         IsUnavailable = usage.IsUnavailable;
         LastCheckedAt = usage.LastCheckedAt;
         AccentBrush = UsageBrushes.ProviderAccent(usage.Name);
-        Windows = usage.Windows.Select(window => new UsageWindowDisplay(window)).ToList();
+        var activeSourceWindows = usage.Windows.Where(window => !window.IsInactive).ToList();
+        var highlightBalance = !usage.IsUnavailable && activeSourceWindows.Any(window => !window.IsBalance);
+        Windows = usage.Windows.Select(window => new UsageWindowDisplay(window, highlightBalance)).ToList();
 
         // Inactive windows (e.g. a "Pro" model the current plan can't use) are still shown, but they
         // must not set the card's headline percent or status — otherwise an unusable model reads as
@@ -46,6 +48,12 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         SummaryProgressBrush = status.Foreground;
         IsBalanceOnly = activeWindows.Count > 0 && activeWindows.All(window => window.IsBalance);
         BalanceSummaryText = IsBalanceOnly ? activeWindows[0].RemainingText : string.Empty;
+        // A balance row riding along with percentage windows (e.g. purchased Codex credits) gets a
+        // small secondary label on the mini strip, since only the summary line fits there.
+        SecondaryBalanceText = IsBalanceOnly || usage.IsUnavailable
+            ? string.Empty
+            : activeWindows.FirstOrDefault(window => window.IsBalance)?.RemainingText ?? string.Empty;
+        HasSecondaryBalance = !string.IsNullOrWhiteSpace(SecondaryBalanceText);
         _summaryText = usage.IsUnavailable || activeWindows.Count == 0
             ? $"{ShortName} - {GetUnavailableSummary(usage.StatusMessage)}"
             : !string.IsNullOrWhiteSpace(BalanceSummaryText)
@@ -109,6 +117,10 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
     public bool IsBalanceOnly { get; }
 
     public string BalanceSummaryText { get; }
+
+    public string SecondaryBalanceText { get; }
+
+    public bool HasSecondaryBalance { get; }
 
     public string SummaryText => IsChecking ? $"{ShortName} - checking" : _summaryText;
 

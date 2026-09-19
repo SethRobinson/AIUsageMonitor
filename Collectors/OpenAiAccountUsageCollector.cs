@@ -79,6 +79,9 @@ public sealed class OpenAiAccountUsageCollector : IForceRefreshUsageCollector
                 windows.Add(ProviderUsageFactory.PercentWindow(title, used, reset));
             }
         }
+        // Purchased usage credits ride along with the quota windows; show them as a balance row.
+        var credits = CodexCredits.TryParse(bucket) ?? CodexCredits.TryParse(root);
+        if (credits?.ToWindow() is { } creditsWindow) windows.Add(creditsWindow);
         var plan = PlanNameFormatter.Format(CodexAccountClient.JsonString(bucket, "planType") is { Length: > 0 } bucketPlan ? bucketPlan : snapshot.PlanType);
         return windows.Count == 0 ? ProviderUsageFactory.Unavailable(KnownProviders.OpenAI, "No Codex subscription quota windows were returned for this account.", "Codex account", plan)
             : new ProviderUsage { Name = KnownProviders.OpenAI, PlanName = plan, Source = "Codex account", StatusMessage = "Live quota for this saved OpenAI account.", Windows = windows };

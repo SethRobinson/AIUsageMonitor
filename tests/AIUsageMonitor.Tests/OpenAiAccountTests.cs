@@ -182,6 +182,39 @@ public sealed class OpenAiAccountTests
     }
 
     [TestMethod]
+    public void PurchasedCreditsBecomeABalanceRowNextToTheQuotaWindows()
+    {
+        var result = OpenAiAccountUsageCollector.ParseUsage(new CodexAccountSnapshot("fake@example.com", "plus", Json("""
+            {"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1900000000},
+              "credits":{"hasCredits":true,"unlimited":false,"balance":"2388.6764000000"},"planType":"pro"}}}
+            """)));
+        Assert.IsFalse(result.IsUnavailable);
+        Assert.HasCount(2, result.Windows);
+        var credits = result.Windows.Single(window => window.Title == CodexCredits.WindowTitle);
+        Assert.IsTrue(credits.IsBalance);
+        Assert.IsTrue(credits.HideReset);
+        Assert.AreEqual("2,389 credits", credits.RemainingText);
+        Assert.AreEqual(0, result.Windows.Single(window => window.Title == "5h").Remaining);
+
+        var none = OpenAiAccountUsageCollector.ParseUsage(new CodexAccountSnapshot("fake@example.com", "plus", Json("""
+            {"rateLimits":{"primary":{"usedPercent":10},"credits":{"hasCredits":false,"unlimited":false,"balance":"0"}}}
+            """)));
+        Assert.HasCount(1, none.Windows);
+        Assert.IsFalse(none.Windows.Any(window => window.IsBalance));
+
+        var unlimited = OpenAiAccountUsageCollector.ParseUsage(new CodexAccountSnapshot("fake@example.com", "plus", Json("""
+            {"rateLimits":{"primary":{"usedPercent":10},"credits":{"hasCredits":true,"unlimited":true,"balance":null}}}
+            """)));
+        Assert.AreEqual("Unlimited credits", unlimited.Windows.Single(window => window.IsBalance).RemainingText);
+
+        var creditsOnly = OpenAiAccountUsageCollector.ParseUsage(new CodexAccountSnapshot("fake@example.com", "plus", Json("""
+            {"rateLimits":{"primary":null,"credits":{"has_credits":true,"unlimited":false,"balance":"12.5"}}}
+            """)));
+        Assert.IsFalse(creditsOnly.IsUnavailable);
+        Assert.AreEqual("12.5 credits", creditsOnly.Windows.Single().RemainingText);
+    }
+
+    [TestMethod]
     public void IdentityIncludesBothUserAndWorkspace()
     {
         using var context = new Context();

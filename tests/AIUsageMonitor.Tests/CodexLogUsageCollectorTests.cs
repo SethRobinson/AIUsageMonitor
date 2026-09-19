@@ -103,6 +103,38 @@ public sealed class CodexLogUsageCollectorTests
         Assert.IsTrue(usage.Windows.All(window => window.ResetAt > now));
     }
 
+    [TestMethod]
+    public void SessionLogCreditsAreParsedAndShownAsABalanceRow()
+    {
+        var now = new DateTimeOffset(2026, 9, 19, 12, 0, 0, TimeSpan.FromHours(9));
+        var line = """
+            {"timestamp":"2026-09-19T02:59:00.0000000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1789805715},"secondary":null,"credits":{"has_credits":true,"unlimited":false,"balance":"2388.6764000000"},"plan_type":"pro"}}}
+            """;
+
+        var snapshot = CodexLogUsageCollector.TryParseRateLimitLine(line);
+
+        Assert.IsNotNull(snapshot);
+        Assert.IsNotNull(snapshot.Credits);
+        Assert.IsTrue(snapshot.Credits.HasCredits);
+        Assert.AreEqual(2388.6764d, snapshot.Credits.Balance!.Value, 0.0001);
+
+        var usage = new CodexLogUsageCollector().BuildProviderUsage(snapshot, string.Empty, now);
+
+        Assert.IsFalse(usage.IsUnavailable);
+        Assert.HasCount(2, usage.Windows);
+        var credits = usage.Windows.Single(window => window.IsBalance);
+        Assert.AreEqual(CodexCredits.WindowTitle, credits.Title);
+        Assert.AreEqual("2,389 credits", credits.RemainingText);
+        Assert.IsTrue(credits.HideReset);
+
+        var noCredits = CodexLogUsageCollector.TryParseRateLimitLine("""
+            {"timestamp":"2026-09-19T02:59:00.0000000Z","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":60.0,"window_minutes":10080,"resets_at":1789805715},"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"plan_type":"pro"}}}
+            """);
+        Assert.IsNotNull(noCredits);
+        Assert.IsFalse(noCredits.Credits!.IsActive);
+        Assert.HasCount(1, new CodexLogUsageCollector().BuildProviderUsage(noCredits, string.Empty, now).Windows);
+    }
+
     private sealed class CultureScope : IDisposable
     {
         private readonly CultureInfo _previousCulture;

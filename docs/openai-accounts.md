@@ -10,6 +10,8 @@ Accounts use `ProviderAccount` and its canonical `DisplayKey`. `AccountUuid` sto
 
 `OpenAiAccountUsageCollector` validates the stored identity before and after collection. It prefers the `codex` bucket in `rateLimitsByLimitId`, falling back to `rateLimits`. Only numeric, present quota windows become usage bars; absent quota does not mean zero used. The automatic collector remains available only in automatic mode.
 
+Both OpenAI collectors also read the `credits` block that Codex returns next to the quota windows (`hasCredits`/`unlimited`/`balance` from the app-server, `has_credits` etc. in session logs). `Collectors\CodexCredits.cs` parses either spelling and, when the account actually holds credits, adds a "Credits" balance row (`IsBalance`, no progress bar, no reset) after the percentage windows. The balance is a credit count, not dollars, so it is shown as "2,389 credits"; `has_credits: false` with a zero balance adds nothing. The row never changes the card headline percent.
+
 `AppSettingsService.Update` serializes read-modify-write operations by settings path, and writes settings atomically. `SavePreservingAccounts` and `AppSettings.CopyAccountSettingsFrom` preserve both providers' account list and the saved-OpenAI mode across stale Settings/tray copies.
 
 ## Validation

@@ -5,8 +5,11 @@ namespace AIUsageMonitor.ViewModels;
 
 public sealed class UsageWindowDisplay
 {
-    public UsageWindowDisplay(UsageWindow usageWindow)
+    public UsageWindowDisplay(UsageWindow usageWindow, bool highlightBalance = false)
     {
+        // A balance row that shares a card with percentage windows (purchased Codex credits) is
+        // tinted amber everywhere so it reads the same in every card size.
+        IsHighlightedBalance = highlightBalance && usageWindow.IsBalance && !usageWindow.IsInactive;
         Title = string.IsNullOrWhiteSpace(usageWindow.Title) ? "Usage" : usageWindow.Title;
         Limit = usageWindow.Limit;
         Used = usageWindow.Used;
@@ -64,6 +67,8 @@ public sealed class UsageWindowDisplay
     public bool IsInactive { get; }
 
     public bool IsBalance { get; }
+
+    public bool IsHighlightedBalance { get; }
 
     public bool ShowsProgress { get; }
 

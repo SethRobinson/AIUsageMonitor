@@ -22,7 +22,7 @@ Save multiple OpenAI accounts and monitor them independently of the login curren
 
 # Download #
 
-Current version: V1.18, latest updated September 15, 2026.
+Current version: V1.19, latest updated September 19, 2026.
 
 **[Download for Windows - Code signed by me, Seth A. Robinson](https://rtsoft.com/files/SethsAIUsageMonitor-win-x64.zip)**
 
@@ -38,6 +38,7 @@ This is app was stupid easy to make, so you have a need for it, you undoubtely c
 - Supports Anthropic, OpenAI/Codex, Antigravity, Gemini, and Cursor local usage checks.
 - Multiple Claude accounts: add extra accounts in Settings (each logs in with the official claude CLI into its own config folder), monitor them side by side, and switch which account the claude CLI uses with one click.
 - Multiple OpenAI accounts: save separate ChatGPT logins in Settings > OpenAI > Accounts. Each account has its own label and quota card, even when you change the login used by Codex.
+- Purchased ChatGPT usage credits show as a "Credits" balance row on the OpenAI card (for saved accounts and the automatic Codex card) so you can see what is left once the plan windows hit 0%.
 - Small grouped cards keep their account labels, such as `Fable - Seth - 35%`.
 - Tray controls for show/hide, refresh now, settings, logs, and exit.
 - Layout adjusts as you drag the size to fit more or less info, UI scale slider in its Settings

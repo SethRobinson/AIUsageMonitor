@@ -115,10 +115,55 @@ public sealed class ProviderUsageCardTests
         Assert.AreEqual("$170.00 left", card.MiniSummaryText);
         Assert.AreEqual("$170.00 left", card.BalanceSummaryText);
         Assert.IsTrue(card.IsBalanceOnly);
+        Assert.IsFalse(card.HasSecondaryBalance);
         Assert.IsFalse(card.ShowsSummaryProgress);
         Assert.AreEqual(1, card.Windows.Count);
         Assert.IsTrue(card.Windows[0].IsBalance);
+        Assert.IsFalse(card.Windows[0].IsHighlightedBalance);
         Assert.IsFalse(card.Windows[0].ShowsProgress);
+    }
+
+    [TestMethod]
+    public void CreditsBalanceRowDoesNotChangeAQuotaCardHeadline()
+    {
+        var usage = new ProviderUsage
+        {
+            Name = KnownProviders.OpenAI,
+            PlanName = "Pro",
+            Source = "Test",
+            StatusMessage = "Test usage.",
+            LastCheckedAt = DateTimeOffset.Now,
+            Windows =
+            [
+                new UsageWindow { Title = "7d", Limit = 100, Used = 100, Remaining = 0, ResetAt = DateTimeOffset.Now.AddDays(3) },
+                new UsageWindow
+                {
+                    Title = "Credits",
+                    Limit = 100,
+                    Used = 0,
+                    Remaining = 100,
+                    RemainingText = "2,389 credits",
+                    HideReset = true,
+                    IsBalance = true
+                }
+            ]
+        };
+
+        var card = new ProviderUsageCard(usage);
+
+        Assert.AreEqual("OpenAI - 0%", card.SummaryText);
+        Assert.AreEqual(0, card.PrimaryRemainingPercent);
+        Assert.IsFalse(card.IsBalanceOnly);
+        Assert.IsTrue(card.ShowsSummaryProgress);
+        Assert.AreEqual(2, card.Windows.Count);
+        Assert.IsTrue(card.Windows[1].IsBalance);
+        Assert.IsFalse(card.Windows[1].ShowsProgress);
+        Assert.AreEqual("2,389 credits", card.Windows[1].RemainingText);
+        Assert.AreEqual(string.Empty, card.Windows[1].ResetText);
+        Assert.IsTrue(card.HasSecondaryBalance);
+        Assert.AreEqual("2,389 credits", card.SecondaryBalanceText);
+        Assert.IsTrue(card.Windows[1].IsHighlightedBalance);
+        Assert.IsFalse(card.Windows[0].IsHighlightedBalance);
     }
 
     [TestMethod]
