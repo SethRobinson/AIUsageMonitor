@@ -167,14 +167,15 @@ public partial class AnthropicApiCreditsSetupWindow : Window
                 return;
             }
 
-            var settings = _settingsService.Load();
-            settings.AnthropicApiCreditsCookieHeaderProtected = ProtectedStringService.Protect(cookieHeader);
-            settings.AnthropicApiCreditsCookiesCapturedAt = DateTimeOffset.Now;
-            settings.AnthropicApiCreditsOrganizationUuid = verifiedOrganization.Uuid;
-            settings.AnthropicApiCreditsOrganizationName = verifiedOrganization.Name;
-            settings.AnthropicApiCreditsLastBalance = verifiedSnapshot.ToCache();
-            settings.SetProviderEnabled(KnownProviders.AnthropicApiCredits, true);
-            _settingsService.Save(settings);
+            _settingsService.Update(settings =>
+            {
+                settings.AnthropicApiCreditsCookieHeaderProtected = ProtectedStringService.Protect(cookieHeader);
+                settings.AnthropicApiCreditsCookiesCapturedAt = DateTimeOffset.Now;
+                settings.AnthropicApiCreditsOrganizationUuid = verifiedOrganization.Uuid;
+                settings.AnthropicApiCreditsOrganizationName = verifiedOrganization.Name;
+                settings.AnthropicApiCreditsLastBalance = verifiedSnapshot.ToCache();
+                settings.SetProviderEnabled(KnownProviders.AnthropicApiCredits, true);
+            });
 
             StatusTextBlock.Text = $"Anthropic API Credits login saved for {FormatOrganization(verifiedOrganization)}. You can close this window and refresh.";
             _logService.Info(KnownProviders.AnthropicApiCredits, "Anthropic Console billing cookies saved for API credits balance.");
@@ -342,13 +343,14 @@ public partial class AnthropicApiCreditsSetupWindow : Window
     {
         try
         {
-            var settings = _settingsService.Load();
-            settings.AnthropicApiCreditsCookieHeaderProtected = string.Empty;
-            settings.AnthropicApiCreditsCookiesCapturedAt = null;
-            settings.AnthropicApiCreditsOrganizationUuid = string.Empty;
-            settings.AnthropicApiCreditsOrganizationName = string.Empty;
-            settings.AnthropicApiCreditsLastBalance = null;
-            _settingsService.Save(settings);
+            _settingsService.Update(settings =>
+            {
+                settings.AnthropicApiCreditsCookieHeaderProtected = string.Empty;
+                settings.AnthropicApiCreditsCookiesCapturedAt = null;
+                settings.AnthropicApiCreditsOrganizationUuid = string.Empty;
+                settings.AnthropicApiCreditsOrganizationName = string.Empty;
+                settings.AnthropicApiCreditsLastBalance = null;
+            });
             OrganizationUuidTextBox.Text = string.Empty;
             StatusTextBlock.Text = "Anthropic API Credits login cleared.";
             _logService.Info(KnownProviders.AnthropicApiCredits, "Anthropic Console billing login cleared.");

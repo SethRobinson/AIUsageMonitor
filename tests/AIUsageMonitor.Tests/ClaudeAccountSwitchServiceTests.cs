@@ -115,6 +115,11 @@ public sealed class ClaudeAccountSwitchServiceTests
         WriteCredentials(Path.Combine(_claudeDirectory, ".credentials.json"), "default-token");
         WriteCredentials(Path.Combine(_accountDirectory, ".credentials.json"), "work-token");
         var target = SaveAccounts(targetUuid: "uuid-work");
+        var billingId = Guid.NewGuid().ToString("N");
+        _settingsService.Update(settings => settings.ProviderAccounts.Single(a => a.IsDefault).ClaudeBilling = new ClaudeBillingConnection
+        {
+            Id = billingId, AccountUuid = "uuid-personal", OrganizationUuid = "org-personal"
+        });
         var service = CreateService(profileUuid: "uuid-personal");
 
         var result = await service.SwitchToAsync(target, CancellationToken.None);
@@ -124,6 +129,8 @@ public sealed class ClaudeAccountSwitchServiceTests
         var adopted = savedSettings.ProviderAccounts.SingleOrDefault(account =>
             !account.IsDefault && account.AccountUuid == "uuid-personal");
         Assert.IsNotNull(adopted, "the outgoing login must be kept as its own account");
+        Assert.AreEqual(billingId, adopted.ClaudeBilling?.Id, "billing follows the outgoing identity into its saved account");
+        Assert.IsNull(savedSettings.ProviderAccounts.Single(a => a.IsDefault).ClaudeBilling);
         Assert.AreEqual("uuid-personal@example.com", adopted!.Email);
         var adoptedCredentials = File.ReadAllText(Path.Combine(adopted.ConfigDir, ".credentials.json"));
         StringAssert.Contains(adoptedCredentials, "default-token");

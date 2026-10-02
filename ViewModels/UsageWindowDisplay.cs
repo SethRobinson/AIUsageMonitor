@@ -7,8 +7,7 @@ public sealed class UsageWindowDisplay
 {
     public UsageWindowDisplay(UsageWindow usageWindow, bool highlightBalance = false)
     {
-        // A balance row that shares a card with percentage windows (purchased Codex credits) is
-        // tinted amber everywhere so it reads the same in every card size.
+        // Purchased balances, including standalone API credits, read consistently in amber.
         IsHighlightedBalance = highlightBalance && usageWindow.IsBalance && !usageWindow.IsInactive;
         Title = string.IsNullOrWhiteSpace(usageWindow.Title) ? "Usage" : usageWindow.Title;
         Limit = usageWindow.Limit;
@@ -39,7 +38,9 @@ public sealed class UsageWindowDisplay
             return;
         }
 
-        var status = UsageStatus.FromRemainingPercent(usageWindow.RemainingPercent);
+        var status = UsageStatus.FromRemainingPercent(usageWindow.IsBalance && usageWindow.Limit <= 0
+            ? usageWindow.EffectiveRemaining > 0 ? 100 : 0
+            : usageWindow.RemainingPercent);
 
         RemainingText = string.IsNullOrWhiteSpace(usageWindow.RemainingText)
             ? $"{usageWindow.RemainingPercent:0}% left"

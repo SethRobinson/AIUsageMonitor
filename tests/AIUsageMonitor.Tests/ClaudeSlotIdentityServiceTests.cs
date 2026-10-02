@@ -50,6 +50,28 @@ public sealed class ClaudeSlotIdentityServiceTests
     }
 
     [TestMethod]
+    [DataRow("{}")]
+    [DataRow("null")]
+    [DataRow("{\"claudeAiOauth\":{\"accessToken\":\"\",\"refreshToken\":\"\",\"expiresAt\":0}}")]
+    [DataRow("{\"claudeAiOauth\":{\"accessToken\":\"   \"}}")]
+    [DataRow("{\"claudeAiOauth\":{\"accessToken\":null}}")]
+    [DataRow("{broken")]
+    public async Task EmptyOrUnreadableCredentialsDoNotClaimTheCachedAccount(string credentials)
+    {
+        WriteCredentials(HomeCredentialsPath, "token-work");
+        WriteClaudeJson(HomeClaudeJsonPath, "uuid-work", "work@example.com");
+        var service = CreateService(("token-work", "uuid-work"));
+        Assert.IsTrue((await service.ResolveAsync(CancellationToken.None))!.IsVerified);
+
+        // Logout can leave the file and identity block behind, with cleared tokens.
+        File.WriteAllText(HomeCredentialsPath, credentials);
+
+        Assert.IsFalse(service.HasLogin);
+        Assert.IsNull(service.GetIdentity(), "neither the verified cache nor the identity block is a login");
+        Assert.IsNull(await service.ResolveAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
     public void IdentityComesFromTheBlockTheCliCachesNextToTheToken()
     {
         WriteCredentials(HomeCredentialsPath, "token-personal");

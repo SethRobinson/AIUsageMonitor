@@ -1,0 +1,31 @@
+<Window x:Class="AIUsageMonitor.Views.ClaudeUsageCreditsSetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Connect Claude usage credits" Width="1050" Height="800" MinWidth="650" MinHeight="500"
+        WindowStartupLocation="CenterOwner" Background="#15171D" Foreground="#F9FAFB"
+        Icon="/Assets/AppIcon.ico" ShowInTaskbar="False">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel Margin="0,0,0,12">
+            <TextBlock x:Name="AccountText" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Margin="0,6,0,0" Foreground="#A8AFBA" TextWrapping="Wrap"
+                       Text="Sign in to this account on Claude, then click Connect. Your usage-credit balance will appear on its existing card. This connection only reads billing data." />
+        </StackPanel>
+        <wv2:WebView2 x:Name="BillingWebView" Grid.Row="1" />
+        <Grid Grid.Row="2" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="StatusText" Margin="0,0,12,0" Foreground="#A8AFBA" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button x:Name="ConnectButton" Grid.Column="1" Content="Connect" Width="100" Height="34" IsEnabled="False" Click="ConnectOnClick" />
+            <Button Grid.Column="2" Content="Close" Width="90" Height="34" Margin="8,0,0,0" Click="CloseOnClick" />
+        </Grid>
+    </Grid>
+</Window>

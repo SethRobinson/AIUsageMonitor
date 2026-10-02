@@ -228,7 +228,7 @@ public sealed class AnthropicApiCreditsCollector : IUsageCollector
         var isUnpaid = snapshot.AmountCents < 0;
         var balanceText = isUnpaid
             ? $"Unpaid balance {FormatUsdFromCents(Math.Abs(snapshot.AmountCents))}"
-            : $"{FormatUsdFromCents(snapshot.AmountCents)} left";
+            : $"{FormatUsdFromCents(snapshot.AmountCents)} credits";
         var detailParts = new List<string>();
 
         if (!string.IsNullOrWhiteSpace(snapshot.OrganizationName))
@@ -422,9 +422,7 @@ public sealed class AnthropicApiCreditsCollector : IUsageCollector
 
     private void SaveBalanceCache(AnthropicApiCreditsSnapshot snapshot)
     {
-        var settings = _settingsService.Load();
-        settings.AnthropicApiCreditsLastBalance = snapshot.ToCache();
-        _settingsService.Save(settings);
+        _settingsService.Update(settings => settings.AnthropicApiCreditsLastBalance = snapshot.ToCache());
     }
 
     private static ProviderUsage? TryCreateProviderFromCache(AppSettings settings, string failure)

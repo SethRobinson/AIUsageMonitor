@@ -104,6 +104,22 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         var profileCachePath = Path.Combine(claudeDirectory, ProfileCacheName);
         var oauthUsageCachePath = Path.Combine(claudeDirectory, OAuthUsageCacheName);
         var account = TryReadClaudeAccount(credentialsPath);
+        if (string.IsNullOrWhiteSpace(account?.AccessToken) && _tokenRefresher is not null)
+        {
+            account = await ResolveAccountAsync(credentialsPath, account, forceRefresh: false, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        // Logout may clear the tokens without removing usage/profile files. Those files
+        // can belong to the previous account and cannot stand in for an authenticated login.
+        if (string.IsNullOrWhiteSpace(account?.AccessToken))
+        {
+            return ProviderUsageFactory.Unavailable(
+                ProviderName,
+                "Claude OAuth credentials are missing or empty. Log this account in again to check its usage.",
+                credentialsPath);
+        }
+
         var cachedPlanName = TryReadCachedPlanName(profileCachePath);
         var planName = ResolvePlanName(account, cachedPlanName);
         var cachedOAuthUsage = TryReadCachedOAuthUsage(oauthUsageCachePath, planName);
@@ -132,7 +148,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
 
         var shouldCollectSupplementalUsage = localUsage.FreshUsage is not null &&
             !forceRefresh &&
-            ShouldCollectSupplementalOAuth(localUsage.FreshUsage, planName, cachedOAuthUsage);
+            ShouldCollectSupplementalOAuth(localUsage.FreshUsage, cachedOAuthUsage);
 
         if (localUsage.FreshUsage is not null && !forceRefresh && !shouldCollectSupplementalUsage)
         {
@@ -417,11 +433,6 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
     {
         try
         {
-            if (!HasSupplementalWindows(usage))
-            {
-                return;
-            }
-
             Directory.CreateDirectory(Path.GetDirectoryName(usageCachePath) ?? ".");
             var cache = new ClaudeOAuthUsageCache
             {
@@ -444,27 +455,26 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
 
     private static bool ShouldCollectSupplementalOAuth(
         ProviderUsage localUsage,
-        string planName,
         ProviderUsage? cachedOAuthUsage)
     {
         if (localUsage.IsUnavailable ||
-            localUsage.Windows.Count == 0 ||
-            HasSupplementalWindows(localUsage))
+            localUsage.Windows.Count == 0)
         {
             return false;
         }
 
-        return IsClaudeMaxPlan(planName) || HasSupplementalWindows(cachedOAuthUsage);
+        // Pro and Max accounts can both hold prepaid usage credits. Status-line exports
+        // commonly omit that balance, even when they include model-specific rate limits.
+        return !localUsage.Windows.Any(window => window.IsBalance) ||
+            GetFreshSupplementalWindows(cachedOAuthUsage, DateTimeOffset.Now)
+                .Any(window => !ContainsWindow(localUsage, window));
     }
 
     private static ProviderUsage MergeCachedSupplementalUsage(ProviderUsage usage, ProviderUsage? cachedOAuthUsage)
     {
-        if (HasSupplementalWindows(usage))
-        {
-            return usage;
-        }
-
-        var supplementalWindows = GetFreshSupplementalWindows(cachedOAuthUsage, DateTimeOffset.Now);
+        var supplementalWindows = GetFreshSupplementalWindows(cachedOAuthUsage, DateTimeOffset.Now)
+            .Where(window => !ContainsWindow(usage, window))
+            .ToList();
         if (supplementalWindows.Count == 0)
         {
             return usage;
@@ -473,9 +483,9 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
         var windows = usage.Windows
             .Concat(supplementalWindows)
             .ToList();
-        var statusMessage = usage.StatusMessage.Contains("Supplemental model usage", StringComparison.OrdinalIgnoreCase)
+        var statusMessage = usage.StatusMessage.Contains("Supplemental usage", StringComparison.OrdinalIgnoreCase)
             ? usage.StatusMessage
-            : usage.StatusMessage + " Supplemental model usage is from the last successful Claude OAuth usage check.";
+            : usage.StatusMessage + " Supplemental usage and balances are from the last successful Claude OAuth usage check.";
 
         return new ProviderUsage
         {
@@ -497,26 +507,21 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             .ToList() ?? [];
     }
 
-    private static bool HasSupplementalWindows(ProviderUsage? usage)
-    {
-        return usage?.Windows.Any(IsSupplementalWindow) == true;
-    }
-
     private static bool IsSupplementalWindow(UsageWindow window)
     {
-        return !string.IsNullOrWhiteSpace(window.DisplayGroupName);
+        return window.IsBalance || !string.IsNullOrWhiteSpace(window.DisplayGroupName);
     }
+
+    private static bool ContainsWindow(ProviderUsage usage, UsageWindow candidate) =>
+        usage.Windows.Any(window =>
+            string.Equals(window.Title, candidate.Title, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(window.DisplayGroupName, candidate.DisplayGroupName, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsCachedWindowFresh(UsageWindow window, DateTimeOffset now)
     {
         return window.HideReset ||
             window.ResetAt is null ||
             window.ResetAt.Value.ToLocalTime() > now.Subtract(PassedResetStaleGrace);
-    }
-
-    private static bool IsClaudeMaxPlan(string planName)
-    {
-        return planName.Contains("Max", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ProviderUsage CloneProviderWithWindows(
@@ -653,6 +658,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
             }
 
             AddExtraUsageWindow(windows, root);
+            ClaudeUsageCredits.AddBalance(windows, root);
 
             if (windows.Count == 0)
             {
@@ -912,6 +918,7 @@ public sealed partial class ClaudeStatusFileUsageCollector : IForceRefreshUsageC
                 AddOAuthWindowIfMissing(windows, root, "seven_day", "7d");
                 AddOAuthWindowIfMissing(windows, root, "seven_day_sonnet", "Sonnet", "Sonnet", "Weekly model limit");
                 AddExtraUsageWindow(windows, root);
+                ClaudeUsageCredits.AddBalance(windows, root);
             }
             catch (Exception ex) when (ex is JsonException or InvalidOperationException)
             {

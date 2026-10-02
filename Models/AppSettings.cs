@@ -100,6 +100,18 @@ public sealed class AppSettings
             .ToList();
     }
 
+    // Keep the implicit Claude slot in settings for identity/switching bookkeeping, but
+    // once accounts are saved they define the list shown and monitored. Disabled saved
+    // accounts still count: disabling them must not silently enable the shared login.
+    public IReadOnlyList<ProviderAccount> GetMonitoringAccounts(string providerName)
+    {
+        var accounts = GetAccounts(providerName);
+        return string.Equals(providerName, KnownProviders.Anthropic, StringComparison.OrdinalIgnoreCase) &&
+            accounts.Any(account => !account.IsDefault)
+                ? accounts.Where(account => !account.IsDefault).ToList()
+                : accounts;
+    }
+
     public void SetProviderEnabled(string providerName, bool isEnabled)
     {
         EnabledProviders[providerName] = isEnabled;

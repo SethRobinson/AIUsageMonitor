@@ -22,7 +22,7 @@ Save multiple OpenAI accounts and monitor them independently of the login curren
 
 # Download #
 
-Current version: V1.19, latest updated September 19, 2026.
+Current version: V1.20, latest updated October 2, 2026.
 
 **[Download for Windows - Code signed by me, Seth A. Robinson](https://rtsoft.com/files/SethsAIUsageMonitor-win-x64.zip)**
 
@@ -36,7 +36,9 @@ This is app was stupid easy to make, so you have a need for it, you undoubtely c
 
 - Always-on-top overlay with percentage remaining, reset times, plan names, and per-provider last checked status.
 - Supports Anthropic, OpenAI/Codex, Antigravity, Gemini, and Cursor local usage checks.
-- Multiple Claude accounts: add extra accounts in Settings (each logs in with the official claude CLI into its own config folder), monitor them side by side, and switch which account the claude CLI uses with one click.
+- Multiple Claude accounts: add accounts in Settings (each logs in with the official claude CLI into its own config folder), monitor them side by side, and switch which account the claude CLI uses with one click. Once saved accounts exist, only those accounts appear in monitoring; the implicit Default account is hidden.
+- Claude usage credits: use **Settings > Anthropic > Accounts > Connect usage credits** beside each account, sign into that account on Claude, and select **Connect**. The app verifies the account and organization, then adds its prepaid balance in yellow to its existing card, including the mini strip. Use **Reconnect credits** when the session expires or **Disconnect credits** to remove it. The additional website login is needed when Claude Code's usage response does not expose the balance.
+- The separate Anthropic API Credits card also uses a yellow balance and keeps an **Anthropic API** label on the mini strip. Console/API credits and Claude subscription usage credits remain separate balances.
 - Multiple OpenAI accounts: save separate ChatGPT logins in Settings > OpenAI > Accounts. Each account has its own label and quota card, even when you change the login used by Codex.
 - Purchased ChatGPT usage credits show as a "Credits" balance row on the OpenAI card (for saved accounts and the automatic Codex card) so you can see what is left once the plan windows hit 0%.
 - Small grouped cards keep their account labels, such as `Fable - Seth - 35%`.
@@ -59,6 +61,8 @@ The first successful saved login replaces the automatic OpenAI card. Each saved 
 Saved logins live under `%LOCALAPPDATA%\SethsAIUsageMonitor\accounts\openai`, with a separate Codex home per account. Codex handles token renewal. The monitor does not switch the login in your Codex CLI or desktop app. A current Codex CLI with the account app-server API is required; the desktop app alone is insufficient for saved accounts.
 
 Developer details and fake-test coverage: [OpenAI account architecture](docs/openai-accounts.md).
+
+Claude billing authentication, account isolation, and refresh behavior: [Claude usage credits](docs/claude-usage-credits.md). This uses an undocumented website endpoint; website changes or browser challenges can temporarily prevent balance collection while quota monitoring continues.
 
 ## AI Disclosure
 

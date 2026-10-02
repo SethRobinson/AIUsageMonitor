@@ -159,7 +159,12 @@ internal static class ScreenshotService
             Label = "Personal",
             ConfigDir = @"C:\demo\accounts\anthropic\personal",
             AccountUuid = "demo-uuid-personal",
-            Email = "personal@example.com"
+            Email = "personal@example.com",
+            ClaudeBilling = new ClaudeBillingConnection
+            {
+                Id = "11111111111111111111111111111111", AccountUuid = "demo-uuid-personal",
+                State = ClaudeBillingConnectionState.Connected, Message = "Connected: $113.85 credits"
+            }
         });
         settingsService.Save(settings);
 

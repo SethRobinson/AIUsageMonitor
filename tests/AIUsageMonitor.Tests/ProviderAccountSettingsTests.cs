@@ -14,6 +14,50 @@ public sealed class ProviderAccountSettingsTests
     };
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void MonitoringListShowsSavedAccountsWithoutImplicitDefault(bool enabled)
+    {
+        var settings = new AppSettings();
+        settings.ProviderAccounts.Add(new ProviderAccount
+        {
+            Id = "anthropic-personal", ProviderName = KnownProviders.Anthropic,
+            Label = "Personal", Enabled = enabled
+        });
+        settings.ProviderAccounts.Add(new ProviderAccount
+        {
+            Id = "anthropic-work", ProviderName = KnownProviders.Anthropic,
+            Label = "Work", Enabled = enabled
+        });
+        settings.Normalize();
+
+        var accounts = settings.GetMonitoringAccounts(KnownProviders.Anthropic);
+
+        CollectionAssert.AreEqual(new[] { "Personal", "Work" }, accounts.Select(account => account.Label).ToArray());
+        Assert.IsTrue(settings.GetAccounts(KnownProviders.Anthropic).Any(account => account.IsDefault),
+            "the hidden slot is retained for switching/identity metadata, not deleted from settings");
+    }
+
+    [TestMethod]
+    public void SingleSavedAccountAlsoReplacesDefaultAndRemovingItRestoresLegacyMonitoring()
+    {
+        var settings = new AppSettings();
+        var personal = new ProviderAccount
+        {
+            Id = "anthropic-personal", ProviderName = KnownProviders.Anthropic, Label = "Personal"
+        };
+        settings.ProviderAccounts.Add(personal);
+        settings.Normalize();
+
+        Assert.AreEqual(personal.Id, settings.GetMonitoringAccounts(KnownProviders.Anthropic).Single().Id);
+
+        settings.ProviderAccounts.Remove(personal);
+        settings.Normalize();
+
+        Assert.IsTrue(settings.GetMonitoringAccounts(KnownProviders.Anthropic).Single().IsDefault);
+    }
+
+    [TestMethod]
     public void NormalizeSynthesizesDefaultAnthropicAccountForLegacySettings()
     {
         var legacyJson = """

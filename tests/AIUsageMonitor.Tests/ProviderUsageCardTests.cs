@@ -100,7 +100,7 @@ public sealed class ProviderUsageCardTests
                     Limit = 100,
                     Used = 0,
                     Remaining = 100,
-                    RemainingText = "$170.00 left",
+                    RemainingText = "$170.00 credits",
                     Detail = "Verified now",
                     HideReset = true,
                     IsBalance = true
@@ -110,16 +110,17 @@ public sealed class ProviderUsageCardTests
 
         var card = new ProviderUsageCard(usage);
 
-        Assert.AreEqual("Anthropic API Credits - $170.00 left", card.SummaryText);
-        Assert.AreEqual("$170.00 left - Anthropic API Credits", card.CompactSummaryText);
-        Assert.AreEqual("$170.00 left", card.MiniSummaryText);
-        Assert.AreEqual("$170.00 left", card.BalanceSummaryText);
+        Assert.AreEqual("Anthropic API Credits - $170.00 credits", card.SummaryText);
+        Assert.AreEqual("Anthropic API Credits - $170.00 credits", card.CompactSummaryText);
+        Assert.AreEqual("Anthropic API", card.MiniSummaryText);
+        Assert.AreEqual("$170.00 credits", card.BalanceSummaryText);
+        Assert.AreEqual("$170.00", card.SecondaryBalanceText);
         Assert.IsTrue(card.IsBalanceOnly);
-        Assert.IsFalse(card.HasSecondaryBalance);
+        Assert.IsTrue(card.HasSecondaryBalance);
         Assert.IsFalse(card.ShowsSummaryProgress);
         Assert.AreEqual(1, card.Windows.Count);
         Assert.IsTrue(card.Windows[0].IsBalance);
-        Assert.IsFalse(card.Windows[0].IsHighlightedBalance);
+        Assert.IsTrue(card.Windows[0].IsHighlightedBalance);
         Assert.IsFalse(card.Windows[0].ShowsProgress);
     }
 

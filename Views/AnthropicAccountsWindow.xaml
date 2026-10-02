@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Claude Accounts"
         Width="560"
-        Height="520"
+        Height="690"
         MinWidth="520"
         MinHeight="420"
         WindowStartupLocation="CenterOwner"

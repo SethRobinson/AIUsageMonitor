@@ -21,6 +21,8 @@ public sealed class ProviderAccount
 
     public string AccountUuid { get; set; } = string.Empty;
 
+    public ClaudeBillingConnection? ClaudeBilling { get; set; }
+
     [System.Text.Json.Serialization.JsonIgnore]
     public string CardLabel => IsDefault && (string.IsNullOrWhiteSpace(Label) ||
         string.Equals(Label.Trim(), DefaultAccountLabel, StringComparison.OrdinalIgnoreCase))
@@ -48,7 +50,8 @@ public sealed class ProviderAccount
             IsDefault = IsDefault,
             ConfigDir = ConfigDir,
             Email = Email,
-            AccountUuid = AccountUuid
+            AccountUuid = AccountUuid,
+            ClaudeBilling = ClaudeBilling?.Clone()
         };
     }
 

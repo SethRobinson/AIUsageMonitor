@@ -970,11 +970,25 @@
                                                                     <ColumnDefinition Width="*" />
                                                                     <ColumnDefinition Width="Auto" />
                                                                 </Grid.ColumnDefinitions>
-                                                                <TextBlock Text="{Binding Title}"
-                                                                           Foreground="#A8AFBA"
-                                                                           FontSize="10"
+                                                                <TextBlock FontSize="10"
                                                                            TextTrimming="CharacterEllipsis"
-                                                                           VerticalAlignment="Center" />
+                                                                           VerticalAlignment="Center">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="{x:Type TextBlock}">
+                                                                            <Setter Property="Text" Value="{Binding Title}" />
+                                                                            <Setter Property="Foreground" Value="#A8AFBA" />
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsBalance}" Value="True">
+                                                                                    <Setter Property="Text" Value="{Binding RemainingText}" />
+                                                                                </DataTrigger>
+                                                                                <DataTrigger Binding="{Binding IsHighlightedBalance}" Value="True">
+                                                                                    <Setter Property="Foreground" Value="#FBBF24" />
+                                                                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
                                                                 <TextBlock Grid.Column="1"
                                                                            Margin="8,0,0,0"
                                                                            Text="{Binding ResetRelativeText}"

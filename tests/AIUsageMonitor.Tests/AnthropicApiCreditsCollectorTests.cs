@@ -33,7 +33,7 @@ public sealed class AnthropicApiCreditsCollectorTests
         Assert.AreEqual("Anthropic Console billing", provider.Source);
         var window = provider.Windows.Single();
         Assert.IsTrue(window.IsBalance);
-        Assert.AreEqual("$170.00 left", window.RemainingText);
+        Assert.AreEqual("$170.00 credits", window.RemainingText);
         StringAssert.Contains(window.Detail, "$12.34 pending this period");
         StringAssert.Contains(window.Detail, "$50.00 expires");
     }
@@ -177,7 +177,7 @@ public sealed class AnthropicApiCreditsCollectorTests
 
         Assert.IsFalse(provider.IsUnavailable);
         StringAssert.Contains(provider.StatusMessage, "Showing last verified");
-        Assert.AreEqual("$170.00 left", provider.Windows.Single().RemainingText);
+        Assert.AreEqual("$170.00 credits", provider.Windows.Single().RemainingText);
         StringAssert.Contains(provider.Windows.Single().Detail, "refresh failed");
     }
 
@@ -226,7 +226,7 @@ public sealed class AnthropicApiCreditsCollectorTests
         var savedSettings = settingsService.Load();
 
         Assert.IsFalse(provider.IsUnavailable);
-        Assert.AreEqual("$43.21 left", provider.Windows.Single().RemainingText);
+        Assert.AreEqual("$43.21 credits", provider.Windows.Single().RemainingText);
         Assert.IsNotNull(savedSettings.AnthropicApiCreditsLastBalance);
         Assert.AreEqual(4321m, savedSettings.AnthropicApiCreditsLastBalance.AmountCents);
         Assert.AreEqual(1200m, savedSettings.AnthropicApiCreditsLastBalance.ExpiringAmountCents);

@@ -49,7 +49,7 @@ public sealed class ProviderLocaleParsingTests
         var usage = await collector.CollectAsync(CancellationToken.None);
 
         Assert.IsFalse(usage.IsUnavailable);
-        Assert.AreEqual(0, handler.CallCount);
+        Assert.AreEqual(1, handler.CallCount, "fresh status exports still check OAuth for a usage-credit balance");
         Assert.AreEqual(79.5, usage.Windows.Single(window => window.Title == "5h").Used, 0.001);
         Assert.AreEqual(66.5, usage.Windows.Single(window => window.Title == "7d").Used, 0.001);
     }
@@ -75,7 +75,7 @@ public sealed class ProviderLocaleParsingTests
         var usage = await collector.CollectAsync(CancellationToken.None);
 
         Assert.IsFalse(usage.IsUnavailable);
-        Assert.AreEqual(0, handler.CallCount);
+        Assert.AreEqual(1, handler.CallCount, "legacy status exports still check OAuth for a usage-credit balance");
         Assert.AreEqual(79.5, usage.Windows.Single(window => window.Title == "5h").Used, 0.001);
         Assert.AreEqual(66.5, usage.Windows.Single(window => window.Title == "7d").Used, 0.001);
     }

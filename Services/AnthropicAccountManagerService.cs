@@ -25,16 +25,19 @@ public sealed class AnthropicAccountManagerService
     private readonly AppSettingsService _settingsService;
     private readonly AppLogService _logService;
     private readonly HttpClient _httpClient;
+    private readonly ClaudeBillingService _billingService;
 
     public AnthropicAccountManagerService(
         AppSettingsService settingsService,
         AppLogService logService,
         HttpClient? httpClient = null,
-        string? accountsRootDirectory = null)
+        string? accountsRootDirectory = null,
+        ClaudeBillingService? billingService = null)
     {
         _settingsService = settingsService;
         _logService = logService;
         _httpClient = httpClient ?? SharedHttpClient;
+        _billingService = billingService ?? new ClaudeBillingService(settingsService);
         AccountsRootDirectory = accountsRootDirectory ?? DefaultAccountsRootDirectory;
     }
 
@@ -62,29 +65,35 @@ public sealed class AnthropicAccountManagerService
             ConfigDir = configDir
         };
 
-        var settings = _settingsService.Load();
-        settings.ProviderAccounts.Add(account);
-        _settingsService.Save(settings);
+        _settingsService.Update(settings => settings.ProviderAccounts.Add(account));
         _logService.Info("Anthropic", $"Created managed Claude account '{account.Label}' at {configDir}.");
         return account;
     }
 
     public bool RemoveAccount(string accountId)
     {
-        var settings = _settingsService.Load();
-        var account = settings.ProviderAccounts.FirstOrDefault(candidate =>
-            string.Equals(candidate.Id, accountId, StringComparison.OrdinalIgnoreCase));
-        if (account is null || account.IsDefault)
+        ProviderAccount? account = null;
+        _settingsService.Update(settings =>
+        {
+            account = settings.ProviderAccounts.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, accountId, StringComparison.OrdinalIgnoreCase) && !candidate.IsDefault);
+            if (account is not null) settings.ProviderAccounts.Remove(account);
+        });
+        if (account is null)
         {
             return false;
         }
 
-        settings.ProviderAccounts.Remove(account);
-        _settingsService.Save(settings);
+        if (account.ClaudeBilling is { } connection)
+        {
+            try { _billingService.DeleteProfileAsync(connection.Id).GetAwaiter().GetResult(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { _logService.Warning("Anthropic", "Removed the billing connection, but its browser profile could not be deleted."); }
+        }
 
         // Only ever delete dirs we created under our own accounts root; never ~/.claude.
         if (!string.IsNullOrWhiteSpace(account.ConfigDir) &&
-            account.ConfigDir.StartsWith(AccountsRootDirectory, StringComparison.OrdinalIgnoreCase) &&
+            Path.GetFullPath(account.ConfigDir).StartsWith(Path.GetFullPath(AccountsRootDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
             Directory.Exists(account.ConfigDir))
         {
             try
@@ -108,32 +117,28 @@ public sealed class AnthropicAccountManagerService
             return false;
         }
 
-        var settings = _settingsService.Load();
-        var account = settings.ProviderAccounts.FirstOrDefault(candidate =>
-            string.Equals(candidate.Id, accountId, StringComparison.OrdinalIgnoreCase));
-        if (account is null)
+        var found = false;
+        _settingsService.Update(settings =>
         {
-            return false;
-        }
-
-        account.Label = newLabel.Trim();
-        _settingsService.Save(settings);
-        return true;
+            var account = settings.ProviderAccounts.FirstOrDefault(candidate => candidate.Id == accountId);
+            if (account is null) return;
+            account.Label = newLabel.Trim();
+            found = true;
+        });
+        return found;
     }
 
     public bool SetAccountEnabled(string accountId, bool enabled)
     {
-        var settings = _settingsService.Load();
-        var account = settings.ProviderAccounts.FirstOrDefault(candidate =>
-            string.Equals(candidate.Id, accountId, StringComparison.OrdinalIgnoreCase));
-        if (account is null)
+        var found = false;
+        _settingsService.Update(settings =>
         {
-            return false;
-        }
-
-        account.Enabled = enabled;
-        _settingsService.Save(settings);
-        return true;
+            var account = settings.ProviderAccounts.FirstOrDefault(candidate => candidate.Id == accountId);
+            if (account is null) return;
+            account.Enabled = enabled;
+            found = true;
+        });
+        return found;
     }
 
     // Launches the official claude CLI in a visible terminal with CLAUDE_CONFIG_DIR pointed
@@ -200,7 +205,7 @@ public sealed class AnthropicAccountManagerService
             "Timed out waiting for the login to complete. Finish /login in the terminal window and use 'Log in again' to retry detection.");
     }
 
-    private static string? TryReadAccessToken(string credentialsPath)
+    internal static string? TryReadAccessToken(string credentialsPath)
     {
         try
         {
@@ -353,25 +358,21 @@ public sealed class AnthropicAccountManagerService
 
     private void PersistLoginIdentity(ProviderAccount account, AccountIdentity? identity)
     {
-        var settings = _settingsService.Load();
-        var saved = settings.ProviderAccounts.FirstOrDefault(candidate =>
-            string.Equals(candidate.Id, account.Id, StringComparison.OrdinalIgnoreCase));
-        if (saved is null)
+        ProviderAccount? saved = null;
+        _settingsService.Update(settings =>
         {
-            return;
-        }
-
-        if (identity is not null)
-        {
+            saved = settings.ProviderAccounts.FirstOrDefault(candidate => candidate.Id == account.Id);
+            if (saved is null || identity is null) return;
             saved.Email = identity.Email;
             saved.AccountUuid = identity.Uuid;
-            if (string.IsNullOrWhiteSpace(saved.Label) && !string.IsNullOrWhiteSpace(identity.Email))
+            if (saved.ClaudeBilling is { } billing && billing.AccountUuid != identity.Uuid)
             {
-                saved.Label = identity.Email;
+                billing.State = ClaudeBillingConnectionState.ReconnectRequired;
+                billing.Message = "Claude account changed. Reconnect usage credits.";
             }
-        }
-
-        _settingsService.Save(settings);
+            if (string.IsNullOrWhiteSpace(saved.Label) && !string.IsNullOrWhiteSpace(identity.Email)) saved.Label = identity.Email;
+        });
+        if (saved is null) return;
         account.Email = saved.Email;
         account.AccountUuid = saved.AccountUuid;
         account.Label = saved.Label;

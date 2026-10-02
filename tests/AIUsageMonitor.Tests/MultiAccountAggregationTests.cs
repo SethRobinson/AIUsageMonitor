@@ -12,6 +12,55 @@ namespace AIUsageMonitor.Tests;
 public sealed class MultiAccountAggregationTests
 {
     [TestMethod]
+    public void LegacySetupWithoutSavedAccountsStillMonitorsDefault()
+    {
+        using var context = AggregatorContext.CreateWithDefaultCollectors(_ => { });
+
+        CollectionAssert.Contains(context.Aggregator.ProviderNames.ToList(), KnownProviders.Anthropic);
+    }
+
+    [TestMethod]
+    public void UnrelatedCliLoginDoesNotAddAThirdAccount()
+    {
+        using var context = AggregatorContext.CreateWithDefaultCollectors(
+            settings =>
+            {
+                settings.ProviderAccounts.Add(CreateDefaultAccount("uuid-other"));
+                var work = CreateManagedAccount("work", "Work");
+                work.AccountUuid = "uuid-work";
+                settings.ProviderAccounts.Add(work);
+                var personal = CreateManagedAccount("personal", "Personal");
+                personal.AccountUuid = "uuid-personal";
+                settings.ProviderAccounts.Add(personal);
+            },
+            home => WriteSlotLogin(home, "uuid-other", "other@example.com"));
+
+        var anthropicNames = context.Aggregator.ProviderNames
+            .Where(name => name == KnownProviders.Anthropic || name.StartsWith("Anthropic - ", StringComparison.Ordinal))
+            .ToList();
+
+        CollectionAssert.AreEquivalent(new[] { "Anthropic - Work", "Anthropic - Personal" }, anthropicNames);
+    }
+
+    [TestMethod]
+    public void DisabledSavedAccountIsNotReenabledByMatchingCliLogin()
+    {
+        using var context = AggregatorContext.CreateWithDefaultCollectors(
+            settings =>
+            {
+                var work = CreateManagedAccount("work", "Work");
+                work.AccountUuid = "uuid-work";
+                work.Enabled = false;
+                settings.ProviderAccounts.Add(work);
+            },
+            home => WriteSlotLogin(home, "uuid-work", "work@example.com"));
+
+        var providerNames = context.Aggregator.ProviderNames.ToList();
+        CollectionAssert.DoesNotContain(providerNames, KnownProviders.Anthropic);
+        CollectionAssert.DoesNotContain(providerNames, "Anthropic - Work");
+    }
+
+    [TestMethod]
     public void ProviderNamesIncludeEachEnabledAnthropicAccount()
     {
         using var context = AggregatorContext.CreateWithDefaultCollectors(settings =>
@@ -21,7 +70,7 @@ public sealed class MultiAccountAggregationTests
 
         var providerNames = context.Aggregator.ProviderNames;
 
-        CollectionAssert.Contains(providerNames.ToList(), KnownProviders.Anthropic);
+        CollectionAssert.DoesNotContain(providerNames.ToList(), KnownProviders.Anthropic);
         CollectionAssert.Contains(providerNames.ToList(), "Anthropic - Work");
     }
 
@@ -37,7 +86,8 @@ public sealed class MultiAccountAggregationTests
 
         var providerNames = context.Aggregator.ProviderNames.ToList();
 
-        CollectionAssert.Contains(providerNames, KnownProviders.Anthropic);
+        CollectionAssert.DoesNotContain(providerNames, KnownProviders.Anthropic,
+            "disabling a saved account must not enable the implicit shared login");
         CollectionAssert.DoesNotContain(providerNames, "Anthropic - Work");
     }
 
@@ -117,9 +167,38 @@ public sealed class MultiAccountAggregationTests
 
         var providerNames = context.Aggregator.ProviderNames.ToList();
 
-        CollectionAssert.Contains(providerNames, KnownProviders.Anthropic);
+        CollectionAssert.DoesNotContain(providerNames, KnownProviders.Anthropic);
         Assert.AreEqual(1, providerNames.Count(name => name == "Anthropic - Work"),
             "a stale stored uuid must not hide an account when ~/.claude has no login at all");
+    }
+
+    [TestMethod]
+    public void ClearedSlotTokensDoNotReplacePersonalCollectorWithSharedSlot()
+    {
+        using var context = AggregatorContext.CreateWithDefaultCollectors(
+            settings =>
+            {
+                settings.ProviderAccounts.Add(CreateDefaultAccount("uuid-personal"));
+                var personal = CreateManagedAccount("personal", "Personal");
+                personal.AccountUuid = "uuid-personal";
+                settings.ProviderAccounts.Add(personal);
+                var work = CreateManagedAccount("work", "Work");
+                work.AccountUuid = "uuid-work";
+                settings.ProviderAccounts.Add(work);
+            },
+            home =>
+            {
+                WriteSlotLogin(home, "uuid-personal", "personal@example.com");
+                File.WriteAllText(Path.Combine(home, ".claude", ".credentials.json"),
+                    """{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}""");
+            });
+
+        var providerNames = context.Aggregator.ProviderNames.ToList();
+
+        CollectionAssert.DoesNotContain(providerNames, KnownProviders.Anthropic,
+            "the empty shared slot must not add an implicit account alongside saved accounts");
+        Assert.AreEqual(1, providerNames.Count(name => name == "Anthropic - Personal"));
+        Assert.AreEqual(1, providerNames.Count(name => name == "Anthropic - Work"));
     }
 
     [TestMethod]

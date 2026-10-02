@@ -376,10 +376,10 @@ public partial class SettingsWindow : Window
 
     private void UpdateAnthropicAccountsSummary()
     {
-        var accounts = Settings.GetAccounts(KnownProviders.Anthropic);
-        AnthropicAccountsSummaryTextBlock.Text = accounts.Count <= 1
+        var accounts = Settings.GetMonitoringAccounts(KnownProviders.Anthropic);
+        AnthropicAccountsSummaryTextBlock.Text = accounts.All(account => account.IsDefault)
             ? "One account (your normal ~/.claude login). Use Accounts to monitor more."
-            : $"{accounts.Count} accounts: {string.Join(", ", accounts.Select(account => account.Label))}.";
+            : $"{accounts.Count} {(accounts.Count == 1 ? "account" : "accounts")}: {string.Join(", ", accounts.Select(account => account.Label))}.";
     }
 
     protected override void OnSourceInitialized(EventArgs e)

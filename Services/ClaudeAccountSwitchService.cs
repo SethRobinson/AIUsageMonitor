@@ -228,7 +228,14 @@ public sealed class ClaudeAccountSwitchService
             // slot itself goes back to being anonymous (the aggregator shows the active
             // managed account's name on the slot card).
             defaultAccount.Label = ProviderAccount.DefaultAccountLabel;
-            _settingsService.Save(settings);
+            _settingsService.Update(current =>
+            {
+                var slot = current.ProviderAccounts.FirstOrDefault(a => a.IsDefault && a.ProviderName == KnownProviders.Anthropic);
+                if (slot is null) return;
+                slot.Email = target.Email;
+                slot.AccountUuid = target.AccountUuid;
+                slot.Label = ProviderAccount.DefaultAccountLabel;
+            });
         }
 
         _logService.Info("Anthropic", $"Switched the Claude CLI account in ~/.claude to '{target.Label}'.");
@@ -359,7 +366,11 @@ public sealed class ClaudeAccountSwitchService
             !string.Equals(defaultAccount.Label, ProviderAccount.DefaultAccountLabel, StringComparison.OrdinalIgnoreCase))
         {
             defaultAccount.Label = ProviderAccount.DefaultAccountLabel;
-            _settingsService.Save(settings);
+            _settingsService.Update(current =>
+            {
+                var slot = current.ProviderAccounts.FirstOrDefault(a => a.IsDefault && a.ProviderName == KnownProviders.Anthropic);
+                if (slot is not null) slot.Label = ProviderAccount.DefaultAccountLabel;
+            });
         }
 
         var adopted = _accountManager.CreateAccount(label);
@@ -374,15 +385,19 @@ public sealed class ClaudeAccountSwitchService
             TryCopyOAuthAccountBlock(HomeClaudeJsonPath, ManagedClaudeJsonPath(adopted.ConfigDir));
         }
 
-        var reloadedSettings = _settingsService.Load();
-        var savedAccount = reloadedSettings.ProviderAccounts.FirstOrDefault(account =>
-            string.Equals(account.Id, adopted.Id, StringComparison.OrdinalIgnoreCase));
-        if (savedAccount is not null)
+        _settingsService.Update(current =>
         {
+            var savedAccount = current.ProviderAccounts.FirstOrDefault(account => account.Id == adopted.Id);
+            if (savedAccount is null) return;
             savedAccount.Email = identity.Email;
             savedAccount.AccountUuid = identity.Uuid;
-            _settingsService.Save(reloadedSettings);
-        }
+            var slot = current.ProviderAccounts.FirstOrDefault(a => a.IsDefault && a.ProviderName == KnownProviders.Anthropic);
+            if (slot?.ClaudeBilling is { } billing && string.Equals(billing.AccountUuid, identity.Uuid, StringComparison.OrdinalIgnoreCase))
+            {
+                savedAccount.ClaudeBilling = billing;
+                slot.ClaudeBilling = null;
+            }
+        });
 
         _logService.Info("Anthropic", $"Kept the previous CLI login as account '{label}' so it can be switched back to.");
     }

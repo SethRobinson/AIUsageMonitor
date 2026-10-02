@@ -27,6 +27,7 @@ public partial class AnthropicAccountsWindow : Window
     private static readonly WpfBrush InputForegroundBrush = new SolidColorBrush(WpfColor.FromRgb(0xF9, 0xFA, 0xFB));
 
     private readonly AppSettingsService _settingsService;
+    private readonly AppLogService _logService;
     private readonly AnthropicAccountManagerService _accountManager;
     private readonly ClaudeAccountSwitchService _switchService;
     private readonly ClaudeSlotIdentityService? _slotIdentityService;
@@ -39,6 +40,7 @@ public partial class AnthropicAccountsWindow : Window
     {
         InitializeComponent();
         _settingsService = settingsService;
+        _logService = logService;
         _accountManager = new AnthropicAccountManagerService(settingsService, logService);
         _switchService = new ClaudeAccountSwitchService(settingsService, logService, _accountManager);
         _slotIdentityService = screenshotMode
@@ -210,21 +212,24 @@ public partial class AnthropicAccountsWindow : Window
     {
         if (_slotIdentityService is null || !_slotIdentityService.HasLogin)
         {
+            _activeAccountUuid = string.Empty;
             ActiveAccountTextBlock.Text = "Active claude CLI account: none (no ~/.claude login found).";
+            RebuildAccountRows();
             return;
         }
 
         var identity = await _slotIdentityService.ResolveAsync(CancellationToken.None);
         if (identity is null || string.IsNullOrWhiteSpace(identity.Uuid))
         {
+            _activeAccountUuid = string.Empty;
             ActiveAccountTextBlock.Text = "Active claude CLI account: could not be checked right now.";
+            RebuildAccountRows();
             return;
         }
 
         _activeAccountUuid = identity.Uuid;
 
-        // Keep the default entry's identity current: it drives the active badge and lets
-        // the aggregator hide the duplicate card of whichever account is active in ~/.claude.
+        // Keep only the slot metadata current; the saved accounts define which cards exist.
         var settings = _settingsService.Load();
         var defaultAccount = settings.ProviderAccounts.FirstOrDefault(account => account.IsDefault &&
             string.Equals(account.ProviderName, KnownProviders.Anthropic, StringComparison.OrdinalIgnoreCase));
@@ -232,9 +237,16 @@ public partial class AnthropicAccountsWindow : Window
             (!string.Equals(defaultAccount.AccountUuid, identity.Uuid, StringComparison.OrdinalIgnoreCase) ||
              !string.Equals(defaultAccount.Email, identity.Email, StringComparison.OrdinalIgnoreCase)))
         {
-            defaultAccount.AccountUuid = identity.Uuid;
-            defaultAccount.Email = identity.Email;
-            _settingsService.Save(settings);
+            _settingsService.Update(current =>
+            {
+                var slot = current.ProviderAccounts.FirstOrDefault(account => account.IsDefault &&
+                    string.Equals(account.ProviderName, KnownProviders.Anthropic, StringComparison.OrdinalIgnoreCase));
+                if (slot is not null)
+                {
+                    slot.AccountUuid = identity.Uuid;
+                    slot.Email = identity.Email;
+                }
+            });
             RefreshRequested = true;
         }
 
@@ -245,7 +257,7 @@ public partial class AnthropicAccountsWindow : Window
         var activeManagedAccount = _settingsService.Load().GetAccounts(KnownProviders.Anthropic).FirstOrDefault(account =>
             !account.IsDefault &&
             string.Equals(account.AccountUuid, identity.Uuid, StringComparison.OrdinalIgnoreCase));
-        if (activeManagedAccount is not null &&
+        if (identity.IsVerified && activeManagedAccount is not null &&
             await _switchService.RepairIdentityCacheAsync(activeManagedAccount, CancellationToken.None))
         {
             StatusTextBlock.Text = $"Repaired stale account info: claude /status was still showing a previous account " +
@@ -271,29 +283,16 @@ public partial class AnthropicAccountsWindow : Window
         AccountsPanel.Children.Clear();
 
         var settings = _settingsService.Load();
-        var accounts = settings.GetAccounts(KnownProviders.Anthropic);
-        // Live detection wins over the stored value: the CLI can be re-logged in from
-        // anywhere, and a stale uuid here badges the wrong row as active.
-        var slotUuid = string.IsNullOrWhiteSpace(_activeAccountUuid)
-            ? accounts.FirstOrDefault(account => account.IsDefault)?.AccountUuid
-            : _activeAccountUuid;
+        var accounts = settings.GetMonitoringAccounts(KnownProviders.Anthropic);
+        // An empty live identity means none/unknown. Falling back to settings here badges
+        // the previous account as active even while the header says there is no login.
+        var slotUuid = _activeAccountUuid;
 
         var haveActiveIdentity = !string.IsNullOrWhiteSpace(slotUuid);
-        var managedAccountIsActive = haveActiveIdentity && accounts.Any(account =>
-            !account.IsDefault &&
-            string.Equals(account.AccountUuid, slotUuid, StringComparison.OrdinalIgnoreCase));
 
         foreach (var account in accounts)
         {
-            // Once the CLI is logged into an account that has its own entry, the Default
-            // row is redundant (it IS that account) and is hidden.
-            if (account.IsDefault && managedAccountIsActive)
-            {
-                continue;
-            }
-
-            // Exactly one row gets the active badge: the managed account matching the
-            // ~/.claude identity, or the default row when no managed account matches.
+            // Only a row matching the current login gets the active badge.
             var isActive = account.IsDefault
                 ? haveActiveIdentity
                 : haveActiveIdentity && string.Equals(account.AccountUuid, slotUuid, StringComparison.OrdinalIgnoreCase);
@@ -368,6 +367,13 @@ public partial class AnthropicAccountsWindow : Window
 
         grid.Children.Add(infoPanel);
 
+        infoPanel.Children.Add(new WpfTextBlock
+        {
+            Text = account.ClaudeBilling?.Message ?? "Usage credits not connected",
+            Foreground = SecondaryTextBrush, FontSize = 12,
+            Margin = new Thickness(24, 10, 0, 0), TextWrapping = TextWrapping.Wrap
+        });
+
         var buttonPanel = new WpfStackPanel { Margin = new Thickness(12, 0, 0, 0) };
         if (!account.IsDefault)
         {
@@ -410,6 +416,45 @@ public partial class AnthropicAccountsWindow : Window
             buttonPanel.Children.Add(removeButton);
         }
 
+        var creditsButton = new WpfButton
+        {
+            Content = account.ClaudeBilling is null ? "Connect usage credits" : "Reconnect credits",
+            Width = 150, Height = 28, FontSize = 13, Margin = new Thickness(0, 6, 0, 0),
+            IsEnabled = !_busy && !string.IsNullOrWhiteSpace(account.AccountUuid)
+        };
+        creditsButton.Click += (_, _) =>
+        {
+            if (_busy) return;
+            var window = new ClaudeUsageCreditsSetupWindow(account, _settingsService, _logService) { Owner = this };
+            if (window.ShowDialog() == true) RefreshRequested = true;
+            RebuildAccountRows();
+        };
+        buttonPanel.Children.Add(creditsButton);
+        if (account.ClaudeBilling is not null)
+        {
+            var disconnectButton = new WpfButton
+            {
+                Content = "Disconnect credits", Width = 150, Height = 28, FontSize = 13,
+                Margin = new Thickness(0, 6, 0, 0), IsEnabled = !_busy
+            };
+            disconnectButton.Click += async (_, _) =>
+            {
+                _busy = true;
+                RebuildAccountRows();
+                try
+                {
+                    await Task.Run(() => new ClaudeBillingService(_settingsService).DisconnectAsync(account.Id));
+                    StatusTextBlock.Text = "Usage credits disconnected.";
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    StatusTextBlock.Text = "Billing credentials removed. The browser profile is still in use; close the billing window and retry cleanup.";
+                }
+                finally { _busy = false; RefreshRequested = true; RebuildAccountRows(); }
+            };
+            buttonPanel.Children.Add(disconnectButton);
+        }
+
         System.Windows.Controls.Grid.SetColumn(buttonPanel, 1);
         grid.Children.Add(buttonPanel);
 
@@ -446,7 +491,7 @@ public partial class AnthropicAccountsWindow : Window
         }
     }
 
-    private void RemoveAccount(ProviderAccount account)
+    private async void RemoveAccount(ProviderAccount account)
     {
         var confirmation = WpfMessageBox.Show(
             this,
@@ -459,12 +504,19 @@ public partial class AnthropicAccountsWindow : Window
             return;
         }
 
-        if (_accountManager.RemoveAccount(account.Id))
+        _busy = true;
+        RebuildAccountRows();
+        try
         {
-            RefreshRequested = true;
-            StatusTextBlock.Text = $"Removed '{account.Label}'.";
-            RebuildAccountRows();
+            if (await Task.Run(() => _accountManager.RemoveAccount(account.Id)))
+            {
+                RefreshRequested = true;
+                StatusTextBlock.Text = $"Removed '{account.Label}'.";
+            }
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { StatusTextBlock.Text = "Could not finish removing this account. Close its login window and try again."; }
+        finally { _busy = false; RebuildAccountRows(); }
     }
 
     private async Task SwitchToAccountAsync(ProviderAccount account)

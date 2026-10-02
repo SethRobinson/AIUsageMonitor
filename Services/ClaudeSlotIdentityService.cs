@@ -56,20 +56,21 @@ public sealed class ClaudeSlotIdentityService
 
     public string ClaudeJsonPath => ClaudeIdentityFiles.ClaudeJsonPathFor(HomeDirectory);
 
-    // False means the slot is logged out entirely; no managed account can be the active one.
-    public bool HasLogin => File.Exists(CredentialsPath);
+    // Claude can leave .credentials.json behind with empty tokens after logout. The file
+    // and cached oauthAccount block alone must never suppress a managed account's collector.
+    public bool HasLogin => ReadTokenFingerprint().Length > 0;
 
     // Synchronous, no network: safe to call from the collector-resolution path, which runs
     // every time the provider list is rebuilt. Returns the verified identity while it still
     // belongs to the token currently in the slot, otherwise the locally cached block.
     public SlotIdentity? GetIdentity()
     {
-        if (!HasLogin)
+        var fingerprint = ReadTokenFingerprint();
+        if (fingerprint.Length == 0)
         {
             return null;
         }
 
-        var fingerprint = ReadTokenFingerprint();
         lock (_cacheLock)
         {
             if (_verifiedIdentity is not null &&
@@ -88,7 +89,8 @@ public sealed class ClaudeSlotIdentityService
     // trouble: an offline tick falls back to the cached block.
     public async Task<SlotIdentity?> ResolveAsync(CancellationToken cancellationToken)
     {
-        if (!HasLogin)
+        var fingerprint = ReadTokenFingerprint();
+        if (fingerprint.Length == 0)
         {
             lock (_cacheLock)
             {
@@ -100,7 +102,6 @@ public sealed class ClaudeSlotIdentityService
         }
 
         var blockIdentity = ReadCachedBlockIdentity();
-        var fingerprint = ReadTokenFingerprint();
 
         lock (_cacheLock)
         {

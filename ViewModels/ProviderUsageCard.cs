@@ -26,18 +26,21 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         IsUnavailable = usage.IsUnavailable;
         LastCheckedAt = usage.LastCheckedAt;
         AccentBrush = UsageBrushes.ProviderAccent(usage.Name);
-        var activeSourceWindows = usage.Windows.Where(window => !window.IsInactive).ToList();
-        var highlightBalance = !usage.IsUnavailable && activeSourceWindows.Any(window => !window.IsBalance);
+        var highlightBalance = !usage.IsUnavailable;
         Windows = usage.Windows.Select(window => new UsageWindowDisplay(window, highlightBalance)).ToList();
 
         // Inactive windows (e.g. a "Pro" model the current plan can't use) are still shown, but they
         // must not set the card's headline percent or status — otherwise an unusable model reads as
         // "0% / Exhausted" even when the usable models are full.
         var activeWindows = Windows.Where(window => !window.IsInactive).ToList();
-        PrimaryRemainingPercent = activeWindows.Count == 0
+        var quotaWindows = activeWindows.Where(window => !window.IsBalance).ToList();
+        var headlineWindows = quotaWindows.Count > 0 ? quotaWindows : activeWindows;
+        PrimaryRemainingPercent = headlineWindows.Count == 0
             ? 0
-            : activeWindows.Min(window => window.RemainingPercent);
-        ShowsSummaryProgress = activeWindows.Any(window => !window.IsBalance);
+            : headlineWindows.Min(window => window.IsBalance && window.Limit <= 0
+                ? window.Remaining > 0 ? 100 : 0
+                : window.RemainingPercent);
+        ShowsSummaryProgress = quotaWindows.Count > 0;
 
         var status = usage.IsUnavailable || activeWindows.Count == 0
             ? UsageStatus.Unavailable
@@ -48,24 +51,23 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
         SummaryProgressBrush = status.Foreground;
         IsBalanceOnly = activeWindows.Count > 0 && activeWindows.All(window => window.IsBalance);
         BalanceSummaryText = IsBalanceOnly ? activeWindows[0].RemainingText : string.Empty;
-        // A balance row riding along with percentage windows (e.g. purchased Codex credits) gets a
-        // small secondary label on the mini strip, since only the summary line fits there.
-        SecondaryBalanceText = IsBalanceOnly || usage.IsUnavailable
+        // Keep the provider/account name and put the balance beside it on the mini strip.
+        SecondaryBalanceText = usage.IsUnavailable
             ? string.Empty
             : activeWindows.FirstOrDefault(window => window.IsBalance)?.RemainingText ?? string.Empty;
+        if (IsBalanceOnly && ShortName == KnownProviders.AnthropicApiCredits && SecondaryBalanceText.EndsWith(" credits", StringComparison.Ordinal))
+            SecondaryBalanceText = SecondaryBalanceText[..^8]; // Leave room for the Anthropic API label on the mini strip.
         HasSecondaryBalance = !string.IsNullOrWhiteSpace(SecondaryBalanceText);
         _summaryText = usage.IsUnavailable || activeWindows.Count == 0
             ? $"{ShortName} - {GetUnavailableSummary(usage.StatusMessage)}"
             : !string.IsNullOrWhiteSpace(BalanceSummaryText)
             ? $"{ShortName} - {BalanceSummaryText}"
             : $"{ShortName} - {PrimaryRemainingPercent:0}%";
-        _compactSummaryText = usage.IsUnavailable || activeWindows.Count == 0 || string.IsNullOrWhiteSpace(BalanceSummaryText)
-            ? _summaryText
-            : $"{BalanceSummaryText} - {ShortName}";
+        _compactSummaryText = _summaryText;
         _miniSummaryText = usage.IsUnavailable || activeWindows.Count == 0
             ? $"{ConstrainedShortName} - {GetUnavailableSummary(usage.StatusMessage)}"
             : !string.IsNullOrWhiteSpace(BalanceSummaryText)
-            ? BalanceSummaryText
+            ? ConstrainedShortName
             : $"{ConstrainedShortName} - {PrimaryRemainingPercent:0}%";
         RefreshCheckedText();
     }
@@ -197,6 +199,7 @@ public sealed class ProviderUsageCard : INotifyPropertyChanged
 
     private static string GetConstrainedShortName(string providerName, string sourceProviderName, string accountLabel)
     {
+        if (providerName == KnownProviders.AnthropicApiCredits) return "Anthropic API";
         if (string.IsNullOrWhiteSpace(sourceProviderName) ||
             string.Equals(providerName, sourceProviderName, StringComparison.OrdinalIgnoreCase) ||
             !providerName.StartsWith(sourceProviderName, StringComparison.OrdinalIgnoreCase))

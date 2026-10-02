@@ -21,16 +21,21 @@ public sealed class UsageAggregatorService
     private readonly object _accountCollectorLock = new();
     private readonly Dictionary<string, AccountCollectorEntry> _openAiAccountCollectors = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<ProviderAccount, IUsageCollector> _openAiCollectorFactory;
+    private readonly IClaudeBillingReader _billingReader;
+    private long _refreshGeneration;
 
     public UsageAggregatorService(
         AppLogService logService,
         AppSettingsService settingsService,
         IReadOnlyList<IUsageCollector>? collectors = null,
         ClaudeSlotIdentityService? slotIdentityService = null,
-        Func<ProviderAccount, IUsageCollector>? openAiCollectorFactory = null)
+        Func<ProviderAccount, IUsageCollector>? openAiCollectorFactory = null,
+        IClaudeBillingReader? billingReader = null)
     {
         _logService = logService;
         _settingsService = settingsService;
+        _billingReader = billingReader ?? new ClaudeBillingService(settingsService);
+        _slotIdentityService = slotIdentityService;
         _openAiCollectorFactory = openAiCollectorFactory ?? (account => new OpenAiAccountUsageCollector(account));
 
         if (collectors is not null)
@@ -115,6 +120,9 @@ public sealed class UsageAggregatorService
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var generation = Interlocked.Increment(ref _refreshGeneration);
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var refreshToken = lifetime.Token;
 
         // Settle which account ~/.claude is logged into before deciding which collectors
         // run, so a login changed outside the app is honored on this very tick.
@@ -124,29 +132,88 @@ public sealed class UsageAggregatorService
         var enabledCollectors = GetEnabledCollectors(settings).ToList();
         RemoveDisabledFailureStates(enabledCollectors);
 
+        var billingAccounts = settings.GetMonitoringAccounts(KnownProviders.Anthropic)
+            .Where(account => account.Enabled && account.ClaudeBilling is not null)
+            .ToDictionary(account => account.DisplayKey, account => account.Clone(), StringComparer.OrdinalIgnoreCase);
+        var slotUuid = billingAccounts.Count > 0 ? ResolveSlotAccountUuid(settings.GetAccounts(KnownProviders.Anthropic)) : string.Empty;
         var pendingTasks = enabledCollectors
-            .Select(collector => Task.Run(
-                () => CollectProviderAsync(collector, forceRefresh, cancellationToken),
+            .Select(collector => Task.Run(async () =>
+                (ProviderUsage?)await CollectProviderAsync(collector, forceRefresh, refreshToken).ConfigureAwait(false),
                 CancellationToken.None))
             .ToList();
+        var billingTasks = new HashSet<Task<ProviderUsage?>>();
         var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
 
-        while (pendingTasks.Count > 0)
+        try
         {
-            var completedTask = await Task
-                .WhenAny(pendingTasks.Cast<Task>().Append(cancellationTask))
-                .ConfigureAwait(false);
-
-            if (ReferenceEquals(completedTask, cancellationTask))
+            while (pendingTasks.Count > 0)
             {
-                throw new OperationCanceledException(cancellationToken);
+                var completedTask = await Task
+                    .WhenAny(pendingTasks.Cast<Task>().Append(cancellationTask))
+                    .ConfigureAwait(false);
+                if (ReferenceEquals(completedTask, cancellationTask)) throw new OperationCanceledException(cancellationToken);
+                if (generation != Volatile.Read(ref _refreshGeneration)) yield break;
+
+                var providerTask = (Task<ProviderUsage?>)completedTask;
+                pendingTasks.Remove(providerTask);
+                var isBilling = billingTasks.Remove(providerTask);
+                var provider = await providerTask.ConfigureAwait(false);
+                if (provider is null) continue;
+                yield return provider;
+
+                // Quotas reach the UI first. Optional billing is a second update under the
+                // same DisplayKey, never another card or a dependency of any quota task.
+                if (!isBilling && !provider.IsUnavailable && !provider.Windows.Any(window => window.IsBalance) &&
+                    billingAccounts.TryGetValue(provider.Name, out var account) &&
+                    account.ClaudeBilling!.State != ClaudeBillingConnectionState.ReconnectRequired &&
+                    (forceRefresh || account.ClaudeBilling.RetryAfter is null || account.ClaudeBilling.RetryAfter <= DateTimeOffset.Now))
+                {
+                    var path = (account.IsDefault || account.AccountUuid == slotUuid) && _slotIdentityService is not null
+                        ? _slotIdentityService.CredentialsPath : ClaudeBillingService.CredentialsPath(account);
+                    var task = Task.Run(() => EnrichBillingAsync(account, path, provider, generation, refreshToken), CancellationToken.None);
+                    pendingTasks.Add(task);
+                    billingTasks.Add(task);
+                }
             }
-
-            var providerTask = (Task<ProviderUsage>)completedTask;
-            pendingTasks.Remove(providerTask);
-
-            yield return await providerTask.ConfigureAwait(false);
         }
+        finally
+        {
+            lifetime.Cancel();
+            // Observe workers abandoned by cancellation or a consumer disposing the stream.
+            foreach (var task in pendingTasks)
+                _ = task.ContinueWith(t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        }
+    }
+
+    private async Task<ProviderUsage?> EnrichBillingAsync(ProviderAccount account, string path, ProviderUsage quota,
+        long generation, CancellationToken cancellationToken)
+    {
+        var fingerprint = ClaudeBillingService.CredentialFingerprint(path);
+        var result = await _billingReader.ReadAsync(account, path, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (generation != Volatile.Read(ref _refreshGeneration) || fingerprint != ClaudeBillingService.CredentialFingerprint(path)) return null;
+        var accepted = false;
+        _settingsService.Update(settings =>
+        {
+            var current = settings.GetMonitoringAccounts(KnownProviders.Anthropic).FirstOrDefault(a => a.Id == account.Id);
+            if (generation != Volatile.Read(ref _refreshGeneration) || !settings.IsProviderEnabled(KnownProviders.Anthropic) ||
+                current is null || !current.Enabled || current.DisplayKey != account.DisplayKey || current.AccountUuid != account.AccountUuid ||
+                current.ConfigDir != account.ConfigDir || current.ClaudeBilling?.Id != account.ClaudeBilling?.Id) return;
+            current.ClaudeBilling!.State = result.State;
+            current.ClaudeBilling.Message = result.Message;
+            current.ClaudeBilling.LastCheckedAt = DateTimeOffset.Now;
+            current.ClaudeBilling.RetryAfter = result.State == ClaudeBillingConnectionState.TemporarilyUnavailable
+                ? DateTimeOffset.Now.AddMinutes(10) : null;
+            accepted = true;
+        });
+        if (!accepted) return null;
+        return new ProviderUsage
+        {
+            Name = quota.Name, SourceProviderName = quota.SourceProviderName, AccountLabel = quota.AccountLabel,
+            PlanName = quota.PlanName, Source = quota.Source, IsUnavailable = quota.IsUnavailable, LastCheckedAt = quota.LastCheckedAt,
+            StatusMessage = result.Balance is null ? quota.StatusMessage + " " + result.Message : quota.StatusMessage,
+            Windows = result.Balance is null ? quota.Windows : [.. quota.Windows, result.Balance]
+        };
     }
 
     private IEnumerable<IUsageCollector> GetEnabledCollectors(AppSettings settings)
@@ -221,10 +288,8 @@ public sealed class UsageAggregatorService
 
         var slotAccountUuid = ResolveSlotAccountUuid(accounts);
 
-        // When a managed account is the one currently logged into ~/.claude, the default
-        // collector represents THAT account: it carries the managed account's key (so its
-        // card keeps the account's name) and the managed dir's own collector is skipped
-        // (its card would just duplicate the slot with staler tokens).
+        // A saved account using ~/.claude can still read its freshest tokens from that
+        // slot. It remains one saved account, never an additional Default card.
         var activeManagedAccount = string.IsNullOrWhiteSpace(slotAccountUuid)
             ? null
             : accounts.FirstOrDefault(account => !account.IsDefault &&
@@ -234,25 +299,21 @@ public sealed class UsageAggregatorService
         // a key is only ever handed out once no matter how the accounts are configured.
         var yieldedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var account in accounts)
+        foreach (var account in settings.GetMonitoringAccounts(KnownProviders.Anthropic))
         {
-            if (account.IsDefault)
+            if (!account.Enabled || !yieldedKeys.Add(account.DisplayKey))
             {
-                var effectiveAccount = activeManagedAccount ?? account;
-                if (!effectiveAccount.Enabled || !yieldedKeys.Add(effectiveAccount.DisplayKey))
-                {
-                    continue;
-                }
-
-                // The wrapper is stateless, so the inner collector's backoff state is shared.
-                yield return string.Equals(effectiveAccount.DisplayKey, KnownProviders.Anthropic, StringComparison.OrdinalIgnoreCase)
-                    ? _defaultAnthropicCollector!
-                    : new AccountScopedUsageCollector(_defaultAnthropicCollector!, effectiveAccount.DisplayKey, KnownProviders.Anthropic, effectiveAccount.CardLabel);
+                continue;
             }
-            else if (account.Enabled &&
-                !ReferenceEquals(account, activeManagedAccount) &&
-                !string.IsNullOrWhiteSpace(account.ConfigDir) &&
-                yieldedKeys.Add(account.DisplayKey))
+
+            if (account.IsDefault || ReferenceEquals(account, activeManagedAccount))
+            {
+                // The wrapper is stateless, so the inner collector's backoff state is shared.
+                yield return string.Equals(account.DisplayKey, KnownProviders.Anthropic, StringComparison.OrdinalIgnoreCase)
+                    ? _defaultAnthropicCollector!
+                    : new AccountScopedUsageCollector(_defaultAnthropicCollector!, account.DisplayKey, KnownProviders.Anthropic, account.CardLabel);
+            }
+            else if (!string.IsNullOrWhiteSpace(account.ConfigDir))
             {
                 yield return GetOrCreateAccountCollector(account);
             }

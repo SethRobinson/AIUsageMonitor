@@ -72,7 +72,7 @@ public sealed class UsageDataService
     {
         var windowName = string.IsNullOrWhiteSpace(window.Title) ? "usage" : window.Title;
 
-        if (window.Limit <= 0)
+        if (!window.IsBalance && window.Limit <= 0)
         {
             throw new InvalidDataException($"{providerName} {windowName} limit must be greater than zero.");
         }
@@ -82,12 +82,12 @@ public sealed class UsageDataService
             throw new InvalidDataException($"{providerName} {windowName} used value cannot be negative.");
         }
 
-        if (window.Used > window.Limit)
+        if (!window.IsBalance && window.Used > window.Limit)
         {
             throw new InvalidDataException($"{providerName} {windowName} used value cannot exceed the limit.");
         }
 
-        if (window.EffectiveRemaining < 0 || window.EffectiveRemaining > window.Limit)
+        if (window.EffectiveRemaining < 0 || (!window.IsBalance && window.EffectiveRemaining > window.Limit))
         {
             throw new InvalidDataException($"{providerName} {windowName} remaining value is outside the valid range.");
         }

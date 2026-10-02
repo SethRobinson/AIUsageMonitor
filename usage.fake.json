@@ -21,6 +21,15 @@
           "resetAt": "2026-05-23T02:05:00+09:00"
         },
         {
+          "title": "Usage credits",
+          "limit": 0,
+          "remaining": 113.85,
+          "remainingText": "$113.85 credits",
+          "detail": "Prepaid Claude usage balance, used after plan limits",
+          "hideReset": true,
+          "isBalance": true
+        },
+        {
           "title": "Fable",
           "displayGroupName": "Fable",
           "limit": 100,
@@ -73,7 +82,7 @@
           "limit": 100,
           "used": 0,
           "remaining": 100,
-          "remainingText": "$170.00 left",
+          "remainingText": "$170.00 credits",
           "detail": "Seth; $25.00 expires Aug 1; verified now",
           "hideReset": true,
           "isBalance": true

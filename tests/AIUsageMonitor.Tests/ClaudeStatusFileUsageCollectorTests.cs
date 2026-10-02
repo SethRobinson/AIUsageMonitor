@@ -10,7 +10,7 @@ namespace AIUsageMonitor.Tests;
 public sealed class ClaudeStatusFileUsageCollectorTests
 {
     [TestMethod]
-    public async Task FreshLocalStatusExportIsUsedBeforeOAuth()
+    public async Task FreshLocalStatusExportSurvivesOAuthBalanceCheckBeingRateLimited()
     {
         var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
         WriteClaudeCredentialsAndStatusExport(homeDirectory, DateTimeOffset.Now);
@@ -25,7 +25,7 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         StringAssert.Contains(usage.StatusMessage, "local status output");
         Assert.AreEqual(2, usage.Windows.Count);
         Assert.AreEqual(42, usage.Windows.Single(window => window.Title == "5h").Used);
-        Assert.AreEqual(0, handler.CallCount);
+        Assert.AreEqual(1, handler.CallCount);
     }
 
     [TestMethod]
@@ -225,7 +225,7 @@ public sealed class ClaudeStatusFileUsageCollectorTests
     }
 
     [TestMethod]
-    public async Task FreshLocalStatusExportWithLimitsPreservesScopedModelCardBeforeOAuth()
+    public async Task FreshLocalStatusExportRetainsScopedModelCardWhenOAuthBalanceCheckIsRateLimited()
     {
         var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
         var fiveHourResetAt = DateTimeOffset.Now.AddHours(3);
@@ -240,7 +240,7 @@ public sealed class ClaudeStatusFileUsageCollectorTests
 
         Assert.IsFalse(usage.IsUnavailable);
         StringAssert.Contains(usage.StatusMessage, "local status output");
-        Assert.AreEqual(0, handler.CallCount);
+        Assert.AreEqual(1, handler.CallCount);
 
         var fable = usage.Windows.Single(window => window.Title == "Fable");
         Assert.AreEqual("Fable", fable.DisplayGroupName);
@@ -323,7 +323,9 @@ public sealed class ClaudeStatusFileUsageCollectorTests
     }
 
     [TestMethod]
-    public async Task CachedOAuthUsageIsUsedWhenCredentialsAreEmptyAndStatusLineHasNoLimits()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task EmptyCredentialsNeverReusePreviousAccountsOAuthCache(bool forceRefresh)
     {
         var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
         WriteEmptyClaudeCredentials(homeDirectory);
@@ -332,16 +334,32 @@ public sealed class ClaudeStatusFileUsageCollectorTests
         WriteCachedOAuthUsage(homeDirectory, DateTimeOffset.Now, DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6));
         var handler = new StubHttpMessageHandler(HttpStatusCode.OK, BuildOAuthUsageResponse(DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6)));
         using var httpClient = new HttpClient(handler);
-        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient, allowCliRefresh: false);
+
+        var usage = await collector.CollectAsync(forceRefresh, CancellationToken.None);
+
+        Assert.IsTrue(usage.IsUnavailable, "a cache with no authenticated owner can belong to the previous account");
+        StringAssert.Contains(usage.StatusMessage, "credentials");
+        Assert.AreEqual(0, usage.Windows.Count);
+        Assert.AreEqual(0, handler.CallCount);
+    }
+
+    [TestMethod]
+    public async Task ClearedTokensDoNotReturnFreshStatusOrOAuthCacheFromPreviousLogin()
+    {
+        var homeDirectory = Path.Combine(Path.GetTempPath(), "AIUsageMonitor.Tests", Guid.NewGuid().ToString("N"));
+        WriteClaudeCredentialsAndStatusExport(homeDirectory, DateTimeOffset.Now);
+        WriteCachedOAuthUsage(homeDirectory, DateTimeOffset.Now, DateTimeOffset.Now.AddHours(3), DateTimeOffset.Now.AddDays(6));
+        File.WriteAllText(Path.Combine(homeDirectory, ".claude", ".credentials.json"),
+            """{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}""");
+        var handler = new StubHttpMessageHandler(HttpStatusCode.OK);
+        using var httpClient = new HttpClient(handler);
+        var collector = new ClaudeStatusFileUsageCollector(homeDirectory, httpClient, allowCliRefresh: false);
 
         var usage = await collector.CollectAsync(CancellationToken.None);
 
-        Assert.IsFalse(usage.IsUnavailable);
-        Assert.AreEqual("Max 20x", usage.PlanName);
-        Assert.AreEqual("Claude OAuth usage endpoint cache", usage.Source);
-        StringAssert.Contains(usage.StatusMessage, "last successful Claude OAuth usage check");
-        Assert.IsFalse(usage.StatusMessage.Contains("stale", StringComparison.OrdinalIgnoreCase));
-        Assert.AreEqual(4, usage.Windows.Count);
+        Assert.IsTrue(usage.IsUnavailable);
+        Assert.AreEqual(0, usage.Windows.Count);
         Assert.AreEqual(0, handler.CallCount);
     }
 
