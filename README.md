@@ -36,10 +36,9 @@ This is app was stupid easy to make, so you have a need for it, you undoubtely c
 
 - Always-on-top overlay with percentage remaining, reset times, plan names, and per-provider last checked status.
 - Supports Anthropic, OpenAI/Codex, Antigravity, Gemini, and Cursor local usage checks.
-- Multiple Claude accounts: add accounts in Settings (each logs in with the official claude CLI into its own config folder), monitor them side by side, and switch which account the claude CLI uses with one click. Once saved accounts exist, only those accounts appear in monitoring; the implicit Default account is hidden.
+- Multiple accounts for OpenAI and Anthropic (Claude), each with its own label and usage card. Add and manage accounts in Settings.
 - Claude usage credits: use **Settings > Anthropic > Accounts > Connect usage credits** beside each account, sign into that account on Claude, and select **Connect**. The app verifies the account and organization, then adds its prepaid balance in yellow to its existing card, including the mini strip. Use **Reconnect credits** when the session expires or **Disconnect credits** to remove it. The additional website login is needed when Claude Code's usage response does not expose the balance.
 - The separate Anthropic API Credits card also uses a yellow balance and keeps an **Anthropic API** label on the mini strip. Console/API credits and Claude subscription usage credits remain separate balances.
-- Multiple OpenAI accounts: save separate ChatGPT logins in Settings > OpenAI > Accounts. Each account has its own label and quota card, even when you change the login used by Codex.
 - Purchased ChatGPT usage credits show as a "Credits" balance row on the OpenAI card (for saved accounts and the automatic Codex card) so you can see what is left once the plan windows hit 0%.
 - Small grouped cards keep their account labels, such as `Fable - Seth - 35%`.
 - Tray controls for show/hide, refresh now, settings, logs, and exit.
@@ -49,16 +48,6 @@ This is app was stupid easy to make, so you have a need for it, you undoubtely c
 - Build a standalone Windows x64 zip with `package-release.bat`.
 
 Requires Windows and the .NET 10 SDK for development.
-
-## Set up multiple OpenAI accounts
-
-1. Install the [Codex CLI](https://developers.openai.com/codex/quickstart).
-2. Open **Settings > OpenAI > Accounts**, enter a label such as **Seth** or **Work**, and select **Add account**.
-3. Complete the OpenAI browser login for that account. Repeat for every account you want to monitor.
-
-The first successful saved login replaces the automatic OpenAI card. Each saved account stays fixed when you sign into a different account in Codex. Rename labels, enable or disable cards, remove saved accounts, or use **Log in again** from this dialog. Signing into a different account during re-login preserves the original login; use **Add account** instead. Disabling or removing every saved account leaves no OpenAI cards until you enable or add one.
-
-Saved logins live under `%LOCALAPPDATA%\SethsAIUsageMonitor\accounts\openai`, with a separate Codex home per account. Codex handles token renewal. The monitor does not switch the login in your Codex CLI or desktop app. A current Codex CLI with the account app-server API is required; the desktop app alone is insufficient for saved accounts.
 
 Developer details and fake-test coverage: [OpenAI account architecture](docs/openai-accounts.md).
 
