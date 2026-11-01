@@ -26,6 +26,16 @@ Current version: V1.21, latest updated November 1, 2026.
 
 **[Download for Windows - Code signed by me, Seth A. Robinson](https://rtsoft.com/files/SethsAIUsageMonitor-win-x64.zip)**
 
+# What's new #
+
+- **V1.21:** A corrupted settings file (say, after a power outage) no longer leaves the app silently stuck with no tray icon. It recovers from a backup instead.
+- **V1.20:** Claude usage credits show up on your account's card (connect them from the Claude Accounts dialog). Also fixed some multi-account mixups.
+- **V1.19:** Purchased ChatGPT credits show up on OpenAI cards.
+- **V1.18:** Save multiple OpenAI accounts and monitor them separately. Account names now show on compact cards too.
+- **V1.17:** Notices when you log into a different Claude account outside the app, so cards don't get mixed up.
+- **V1.16:** Better layouts at all window sizes.
+- **V1.15:** Resize the window from any edge, plus a new stacked layout for tall, narrow windows.
+
 # Info #
 
 Windows tray app for checking remaining AI subscription usage across Anthropic, OpenAI/Codex, Antigravity, Gemini, and Cursor.
