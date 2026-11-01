@@ -104,10 +104,26 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var settingsService = new AppSettingsService();
-        _trayIconService = new TrayIconService(new UsageAggregatorService(logService, settingsService), settingsService, logService);
-        _singleInstanceCoordinator.StartListening(HandleSingleInstanceCommand);
-        _trayIconService.ShowOverlay();
+        try
+        {
+            var settingsService = new AppSettingsService(logService: logService);
+            _trayIconService = new TrayIconService(new UsageAggregatorService(logService, settingsService), settingsService, logService);
+            _singleInstanceCoordinator.StartListening(HandleSingleInstanceCommand);
+            _trayIconService.ShowOverlay();
+        }
+        catch (Exception exception)
+        {
+            // The dispatcher handler below keeps the process alive, so without this a startup
+            // failure would leave a tray-less instance holding the single-instance lock and
+            // turning away every later launch (issue #2).
+            logService.Error("Startup", $"Startup failed: {exception}");
+            System.Windows.MessageBox.Show(
+                $"{AppMetadata.DisplayName} could not start.\n\n{exception.Message}\n\nDetails were written to {logService.LogPath}.",
+                AppMetadata.DisplayName,
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
+            Shutdown(1);
+        }
     }
 
     private void HandleSingleInstanceCommand(string command)

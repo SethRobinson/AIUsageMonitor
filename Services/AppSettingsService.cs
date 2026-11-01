@@ -21,8 +21,11 @@ public sealed class AppSettingsService
     private static readonly ConcurrentDictionary<string, object> SettingsLocks = new(StringComparer.OrdinalIgnoreCase);
     private object SyncRoot => SettingsLocks.GetOrAdd(Path.GetFullPath(SettingsPath), _ => new object());
 
-    public AppSettingsService(string? baseDirectory = null)
+    private readonly AppLogService? _logService;
+
+    public AppSettingsService(string? baseDirectory = null, AppLogService? logService = null)
     {
+        _logService = logService;
         var currentDirectoryPath = Path.Combine(baseDirectory ?? Environment.CurrentDirectory, FileName);
         var outputDirectoryPath = baseDirectory is null
             ? Path.Combine(AppContext.BaseDirectory, FileName)
@@ -33,6 +36,9 @@ public sealed class AppSettingsService
             : currentDirectoryPath;
     }
 
+    // Copy of the last successfully written settings, used when the main file is unreadable.
+    public string BackupPath => SettingsPath + ".bak";
+
     public AppSettings Load()
     {
         lock (SyncRoot) return LoadCore();
@@ -40,17 +46,116 @@ public sealed class AppSettingsService
 
     private AppSettings LoadCore()
     {
-        if (!File.Exists(SettingsPath))
+        if (TryReadSettings(SettingsPath, out var settings, out var error))
         {
-            var defaultSettings = new AppSettings();
-            Save(defaultSettings);
-            return defaultSettings;
+            return settings;
         }
 
-        var json = File.ReadAllText(SettingsPath);
-        var settings = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions) ?? new AppSettings();
-        settings.Normalize();
-        return settings;
+        // A missing file is a first run (or a deliberate reset): start from defaults.
+        if (error is not null)
+        {
+            settings = RecoverFromCorruptFile(error);
+            SaveCore(settings);
+            return settings;
+        }
+
+        var defaultSettings = new AppSettings();
+        SaveCore(defaultSettings);
+        return defaultSettings;
+    }
+
+    // A power loss can leave the file zero-filled (issue #2). Never let one bad file stop the
+    // app from starting: set it aside, then recover from the backup, a leftover temp file from
+    // an interrupted save, or defaults.
+    private AppSettings RecoverFromCorruptFile(string error)
+    {
+        var quarantinePath = QuarantineCorruptFile();
+        _logService?.Warning("Settings", $"Settings file was unreadable ({error}); moved it to {quarantinePath}.");
+
+        foreach (var candidate in GetRecoveryCandidates())
+        {
+            if (TryReadSettings(candidate, out var recovered, out _))
+            {
+                _logService?.Warning("Settings", $"Recovered settings from {candidate}.");
+                return recovered;
+            }
+        }
+
+        _logService?.Warning("Settings", "No usable settings backup was found; starting with default settings.");
+        return new AppSettings();
+    }
+
+    // Returns false with a null error when the file does not exist, and with an error message
+    // when it exists but cannot be parsed. IO failures (for example a locked file) still throw,
+    // so a transient read problem never causes a good file to be quarantined.
+    private static bool TryReadSettings(string path, out AppSettings settings, out string? error)
+    {
+        settings = null!;
+        error = null;
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        var json = File.ReadAllText(path);
+        if (string.IsNullOrWhiteSpace(json.Replace('\0', ' ')))
+        {
+            error = json.Length == 0 ? "file is empty" : "file contains no data";
+            return false;
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions);
+            if (parsed is null)
+            {
+                error = "file contains no settings object";
+                return false;
+            }
+
+            parsed.Normalize();
+            settings = parsed;
+            return true;
+        }
+        // Only parsing and normalizing happen here, so any exception means the contents are bad.
+        catch (Exception exception)
+        {
+            error = exception.Message;
+            return false;
+        }
+    }
+
+    private string QuarantineCorruptFile()
+    {
+        var quarantinePath = $"{SettingsPath}.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}";
+        for (var suffix = 2; File.Exists(quarantinePath); suffix++)
+        {
+            quarantinePath = $"{SettingsPath}.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}-{suffix}";
+        }
+
+        File.Move(SettingsPath, quarantinePath);
+        return quarantinePath;
+    }
+
+    private IEnumerable<string> GetRecoveryCandidates()
+    {
+        yield return BackupPath;
+
+        var directory = Path.GetDirectoryName(Path.GetFullPath(SettingsPath));
+        if (directory is null || !Directory.Exists(directory))
+        {
+            yield break;
+        }
+
+        var temporaryFiles = new DirectoryInfo(directory)
+            .EnumerateFiles(Path.GetFileName(SettingsPath) + ".*.tmp")
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .Select(file => file.FullName)
+            .ToList();
+        foreach (var temporaryFile in temporaryFiles)
+        {
+            yield return temporaryFile;
+        }
     }
 
     public void Save(AppSettings settings)
@@ -81,11 +186,26 @@ public sealed class AppSettingsService
     {
         settings.Normalize();
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
-        var temporary = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        WriteDurably(SettingsPath, json);
+        WriteDurably(BackupPath, json);
+    }
+
+    // Flush the data to disk before the rename so a power loss cannot keep the rename while
+    // losing the contents, which is what left zero-filled settings files behind (issue #2).
+    private static void WriteDurably(string path, string contents)
+    {
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(temporary, json);
-            File.Move(temporary, SettingsPath, overwrite: true);
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream))
+            {
+                writer.Write(contents);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporary, path, overwrite: true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
