@@ -28,7 +28,7 @@ Current version: V1.21, latest updated November 1, 2026.
 
 # What's new #
 
-- **V1.21:** A corrupted settings file (say, after a power outage) no longer leaves the app silently stuck with no tray icon. It recovers from a backup instead.
+- **V1.21:** Settings are now saved with an atomic write (written to a temp file, flushed to disk, then renamed into place), so a power outage mid-save can't leave you with a broken settings file. If one is ever unreadable anyway, the app sets it aside and starts fresh instead of getting silently stuck with no tray icon.
 - **V1.20:** Claude usage credits show up on your account's card (connect them from the Claude Accounts dialog). Also fixed some multi-account mixups.
 - **V1.19:** Purchased ChatGPT credits show up on OpenAI cards.
 - **V1.18:** Save multiple OpenAI accounts and monitor them separately. Account names now show on compact cards too.

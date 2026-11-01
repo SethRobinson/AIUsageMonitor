@@ -36,9 +36,6 @@ public sealed class AppSettingsService
             : currentDirectoryPath;
     }
 
-    // Copy of the last successfully written settings, used when the main file is unreadable.
-    public string BackupPath => SettingsPath + ".bak";
-
     public AppSettings Load()
     {
         lock (SyncRoot) return LoadCore();
@@ -65,14 +62,14 @@ public sealed class AppSettingsService
     }
 
     // A power loss can leave the file zero-filled (issue #2). Never let one bad file stop the
-    // app from starting: set it aside, then recover from the backup, a leftover temp file from
-    // an interrupted save, or defaults.
+    // app from starting: set it aside, then recover from a leftover temp file from an
+    // interrupted save, or fall back to defaults.
     private AppSettings RecoverFromCorruptFile(string error)
     {
         var quarantinePath = QuarantineCorruptFile();
         _logService?.Warning("Settings", $"Settings file was unreadable ({error}); moved it to {quarantinePath}.");
 
-        foreach (var candidate in GetRecoveryCandidates())
+        foreach (var candidate in GetLeftoverTemporaryFiles())
         {
             if (TryReadSettings(candidate, out var recovered, out _))
             {
@@ -81,7 +78,7 @@ public sealed class AppSettingsService
             }
         }
 
-        _logService?.Warning("Settings", "No usable settings backup was found; starting with default settings.");
+        _logService?.Warning("Settings", "No usable leftover settings file was found; starting with default settings.");
         return new AppSettings();
     }
 
@@ -137,25 +134,20 @@ public sealed class AppSettingsService
         return quarantinePath;
     }
 
-    private IEnumerable<string> GetRecoveryCandidates()
+    // Newest first, so an interrupted save wins over older leftovers.
+    private IEnumerable<string> GetLeftoverTemporaryFiles()
     {
-        yield return BackupPath;
-
         var directory = Path.GetDirectoryName(Path.GetFullPath(SettingsPath));
         if (directory is null || !Directory.Exists(directory))
         {
-            yield break;
+            return [];
         }
 
-        var temporaryFiles = new DirectoryInfo(directory)
+        return new DirectoryInfo(directory)
             .EnumerateFiles(Path.GetFileName(SettingsPath) + ".*.tmp")
             .OrderByDescending(file => file.LastWriteTimeUtc)
             .Select(file => file.FullName)
             .ToList();
-        foreach (var temporaryFile in temporaryFiles)
-        {
-            yield return temporaryFile;
-        }
     }
 
     public void Save(AppSettings settings)
@@ -186,13 +178,17 @@ public sealed class AppSettingsService
     {
         settings.Normalize();
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
-        WriteDurably(SettingsPath, json);
-        WriteDurably(BackupPath, json);
+        WriteAtomically(SettingsPath, json);
+
+        // V1.21 kept a permanent .bak copy; settings no longer leave any extra file behind.
+        var legacyBackupPath = SettingsPath + ".bak";
+        if (File.Exists(legacyBackupPath)) File.Delete(legacyBackupPath);
     }
 
-    // Flush the data to disk before the rename so a power loss cannot keep the rename while
-    // losing the contents, which is what left zero-filled settings files behind (issue #2).
-    private static void WriteDurably(string path, string contents)
+    // Atomic write: flush the data to a temp file on disk, then rename it over the real file, so
+    // a power loss cannot keep the rename while losing the contents, which is what left
+    // zero-filled settings files behind (issue #2). No temp file remains once the write finishes.
+    private static void WriteAtomically(string path, string contents)
     {
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try

@@ -96,24 +96,9 @@ public sealed class AppSettingsServiceRecoveryTests
     }
 
     [TestMethod]
-    public void CorruptFileRecoversFromBackup()
-    {
-        _settings.Save(new AppSettings { UiScalePercent = 125 });
-        File.WriteAllBytes(_settings.SettingsPath, new byte[3302]);
-
-        var settings = _settings.Load();
-
-        Assert.AreEqual(125, settings.UiScalePercent);
-        Assert.AreEqual(125, new AppSettingsService(_root).Load().UiScalePercent, "the recovered settings must be written back");
-        Assert.HasCount(1, CorruptFiles());
-        StringAssert.Contains(File.ReadAllText(_log.LogPath), "Recovered settings from");
-    }
-
-    [TestMethod]
-    public void CorruptFileAndBackupRecoverFromNewestLeftoverTempFile()
+    public void CorruptFileRecoversFromNewestLeftoverTempFile()
     {
         File.WriteAllBytes(_settings.SettingsPath, new byte[3302]);
-        File.WriteAllBytes(_settings.BackupPath, new byte[3302]);
         var older = _settings.SettingsPath + ".older.tmp";
         var newer = _settings.SettingsPath + ".newer.tmp";
         var garbage = _settings.SettingsPath + ".garbage.tmp";
@@ -125,7 +110,9 @@ public sealed class AppSettingsServiceRecoveryTests
         File.SetLastWriteTimeUtc(garbage, DateTime.UtcNow);
 
         Assert.AreEqual(115, _settings.Load().UiScalePercent);
+        Assert.AreEqual(115, new AppSettingsService(_root).Load().UiScalePercent, "the recovered settings must be written back");
         AssertMainFileIsValid();
+        StringAssert.Contains(File.ReadAllText(_log.LogPath), "Recovered settings from");
     }
 
     [TestMethod]
@@ -153,13 +140,25 @@ public sealed class AppSettingsServiceRecoveryTests
     }
 
     [TestMethod]
-    public void SaveWritesMainAndBackupWithoutLeavingTempFiles()
+    public void SaveLeavesOnlyTheSettingsFile()
     {
         _settings.Save(new AppSettings { UiScalePercent = 135 });
 
-        Assert.AreEqual(File.ReadAllText(_settings.SettingsPath), File.ReadAllText(_settings.BackupPath));
         Assert.AreEqual(135, _settings.Load().UiScalePercent);
-        Assert.IsEmpty(Directory.GetFiles(_root, "*.tmp"));
+        CollectionAssert.AreEquivalent(
+            new[] { Path.GetFileName(_settings.SettingsPath) },
+            Directory.GetFiles(_root, "monitor.settings.json*").Select(Path.GetFileName).ToArray());
+    }
+
+    [TestMethod]
+    public void SaveRemovesBackupLeftByVersion121()
+    {
+        var legacyBackupPath = _settings.SettingsPath + ".bak";
+        File.WriteAllText(legacyBackupPath, """{ "UiScalePercent": 125 }""");
+
+        _settings.Save(new AppSettings { UiScalePercent = 135 });
+
+        Assert.IsFalse(File.Exists(legacyBackupPath));
     }
 
     [TestMethod]
